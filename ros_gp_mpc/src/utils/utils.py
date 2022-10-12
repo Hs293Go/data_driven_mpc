@@ -12,23 +12,24 @@ this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
 
-import os
-import math
-import json
 import errno
-import shutil
-import joblib
+import json
+import math
+import os
 import random
-import pyquaternion
-import numpy as np
-import casadi as cs
-from sklearn import preprocessing
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans
-from scipy.interpolate.interpolate import interp1d
-from config.configuration_parameters import DirectoryConfig as GPConfig
-import matplotlib.pyplot as plt
+import shutil
 import xml.etree.ElementTree as XMLtree
+
+import casadi as cs
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import pyquaternion
+from config.configuration_parameters import DirectoryConfig as GPConfig
+from scipy.interpolate.interpolate import interp1d
+from sklearn import preprocessing
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 
 
 def safe_mkdir_recursive(directory, overwrite=False):
@@ -45,7 +46,7 @@ def safe_mkdir_recursive(directory, overwrite=False):
             try:
                 shutil.rmtree(directory)
             except:
-                print('Error while removing directory: {0}'.format(directory))
+                print("Error while removing directory: {0}".format(directory))
 
 
 def safe_mknode_recursive(destiny_dir, node_name, overwrite):
@@ -69,7 +70,7 @@ def jsonify(array):
 def undo_jsonify(array):
     x = []
     for elem in array:
-        a = elem.split('[')[1].split(']')[0].split(',')
+        a = elem.split("[")[1].split("]")[0].split(",")
         a = [float(num) for num in a]
         x = x + [a]
     return np.array(x)
@@ -97,21 +98,23 @@ def get_data_dir_and_file(ds_name, training_split, params, read_only=False):
     if ds_name in d and os.path.exists(os.path.join(rec_file_dir, ds_name, split)):
         dataset_instances = []
         for (_, _, file_names) in os.walk(os.path.join(rec_file_dir, ds_name, split)):
-            dataset_instances.extend([file.split('.csv')[0] for file in file_names])
+            dataset_instances.extend([file.split(".csv")[0] for file in file_names])
     else:
         if read_only:
             return None
         safe_mkdir_recursive(os.path.join(rec_file_dir, ds_name, split))
         dataset_instances = []
 
-    json_file_name = os.path.join(rec_file_dir, 'metadata.json')
+    json_file_name = os.path.join(rec_file_dir, "metadata.json")
     if not f:
         if read_only:
             return None
         # Metadata file not found -> make new one
-        with open(json_file_name, 'w') as json_file:
+        with open(json_file_name, "w") as json_file:
             ds_instance_name = "dataset_001"
-            json.dump({ds_name: {split: {ds_instance_name: params}}}, json_file, indent=4)
+            json.dump(
+                {ds_name: {split: {ds_instance_name: params}}}, json_file, indent=4
+            )
     else:
         # Metadata file existing
         with open(json_file_name) as json_file:
@@ -125,7 +128,9 @@ def get_data_dir_and_file(ds_name, training_split, params, read_only=False):
                 if metadata[ds_name][split][instance] == params:
                     existing_instance_idx = i
                     if not read_only:
-                        print("This configuration already exists in the dataset with the same name.")
+                        print(
+                            "This configuration already exists in the dataset with the same name."
+                        )
 
             if existing_instance_idx == -1:
 
@@ -134,9 +139,13 @@ def get_data_dir_and_file(ds_name, training_split, params, read_only=False):
 
                 if dataset_instances:
                     # Dataset exists but this is a new instance
-                    existing_instances = [int(instance.split("_")[1]) for instance in dataset_instances]
+                    existing_instances = [
+                        int(instance.split("_")[1]) for instance in dataset_instances
+                    ]
                     max_instance_number = max(existing_instances)
-                    ds_instance_name = "dataset_" + str(max_instance_number + 1).zfill(3)
+                    ds_instance_name = "dataset_" + str(max_instance_number + 1).zfill(
+                        3
+                    )
 
                     # Add to metadata dictionary the new instance
                     metadata[ds_name][split][ds_instance_name] = params
@@ -166,29 +175,31 @@ def get_data_dir_and_file(ds_name, training_split, params, read_only=False):
                 metadata[ds_name] = {split: {ds_instance_name: params}}
 
         if not read_only:
-            with open(json_file_name, 'w') as json_file:
+            with open(json_file_name, "w") as json_file:
                 json.dump(metadata, json_file, indent=4)
 
-    return os.path.join(rec_file_dir, ds_name, split), ds_instance_name + '.csv'
+    return os.path.join(rec_file_dir, ds_name, split), ds_instance_name + ".csv"
 
 
 def get_model_dir_and_file(model_options):
-    directory = os.path.join(GPConfig.SAVE_DIR, str(model_options["git"]), str(model_options["model_name"]))
+    directory = os.path.join(
+        GPConfig.SAVE_DIR, str(model_options["git"]), str(model_options["model_name"])
+    )
 
     model_params = model_options["params"]
-    file_name = ''
+    file_name = ""
     model_vars = list(model_params.keys())
     model_vars.sort()
     for i, param in enumerate(model_vars):
         if i > 0:
-            file_name += '__'
-        file_name += 'no_' if not model_params[param] else ''
+            file_name += "__"
+        file_name += "no_" if not model_params[param] else ""
         file_name += param
 
     return directory, file_name
 
 
-def load_pickled_models(directory='', file_name='', model_options=None):
+def load_pickled_models(directory="", file_name="", model_options=None):
     """
     Loads a pre-trained model from the specified directory, contained in a given pickle filename. Otherwise, if
     the model_options dictionary is given, use its contents to reconstruct the directory location of the pre-trained
@@ -214,15 +225,17 @@ def load_pickled_models(directory='', file_name='', model_options=None):
 
     try:
         for file in pickled_files:
-            if not file.startswith(file_name) and file != 'feats.csv':
+            if not file.startswith(file_name) and file != "feats.csv":
                 continue
-            if '.pkl' not in file and '.csv' not in file:
+            if ".pkl" not in file and ".csv" not in file:
                 continue
-            if '.pkl' in file:
+            if ".pkl" in file:
                 loaded_models.append(joblib.load(os.path.join(directory, file)))
 
     except IsADirectoryError:
-        raise FileNotFoundError("Tried to load file from directory %s, but it was not found." % directory)
+        raise FileNotFoundError(
+            "Tried to load file from directory %s, but it was not found." % directory
+        )
 
     if loaded_models is not None:
         if loaded_models:
@@ -248,15 +261,15 @@ def interpol_mse(t_1, x_1, t_2, x_2, n_interp_samples=1000):
     err = np.zeros((n_interp_samples, x_1.shape[1]))
 
     for dim in range(x_1.shape[1]):
-        x1_interp = interp1d(t_1, x_1[:, dim], kind='cubic')
-        x2_interp = interp1d(t_2, x_2[:, dim], kind='cubic')
+        x1_interp = interp1d(t_1, x_1[:, dim], kind="cubic")
+        x2_interp = interp1d(t_2, x_2[:, dim], kind="cubic")
 
         x1_sample = x1_interp(t_interp)
         x2_sample = x2_interp(t_interp)
 
         err[:, dim] = x1_sample - x2_sample
 
-    return np.mean(np.sqrt(np.sum(err ** 2, axis=1)))
+    return np.mean(np.sqrt(np.sum(err**2, axis=1)))
 
 
 def euclidean_dist(x, y, thresh=None):
@@ -282,10 +295,18 @@ def euclidean_dist(x, y, thresh=None):
 
 
 def euler_to_quaternion(roll, pitch, yaw):
-    qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
-    qy = np.cos(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2)
-    qz = np.cos(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2) - np.sin(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2)
-    qw = np.cos(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
+    qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(
+        roll / 2
+    ) * np.sin(pitch / 2) * np.sin(yaw / 2)
+    qy = np.cos(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2) + np.sin(
+        roll / 2
+    ) * np.cos(pitch / 2) * np.sin(yaw / 2)
+    qz = np.cos(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2) - np.sin(
+        roll / 2
+    ) * np.sin(pitch / 2) * np.cos(yaw / 2)
+    qw = np.cos(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) + np.sin(
+        roll / 2
+    ) * np.sin(pitch / 2) * np.sin(yaw / 2)
 
     return np.array([qw, qx, qy, qz])
 
@@ -306,7 +327,7 @@ def unit_quat(q):
     if isinstance(q, np.ndarray):
         # if (q == np.zeros(4)).all():
         #     q = np.array([1, 0, 0, 0])
-        q_norm = np.sqrt(np.sum(q ** 2))
+        q_norm = np.sqrt(np.sum(q**2))
     else:
         q_norm = cs.sqrt(cs.sumsqr(q))
     return 1 / q_norm * q
@@ -324,16 +345,44 @@ def q_to_rot_mat(q):
     qw, qx, qy, qz = q[0], q[1], q[2], q[3]
 
     if isinstance(q, np.ndarray):
-        rot_mat = np.array([
-            [1 - 2 * (qy ** 2 + qz ** 2), 2 * (qx * qy - qw * qz), 2 * (qx * qz + qw * qy)],
-            [2 * (qx * qy + qw * qz), 1 - 2 * (qx ** 2 + qz ** 2), 2 * (qy * qz - qw * qx)],
-            [2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx ** 2 + qy ** 2)]])
+        rot_mat = np.array(
+            [
+                [
+                    1 - 2 * (qy ** 2 + qz ** 2),
+                    2 * (qx * qy - qw * qz),
+                    2 * (qx * qz + qw * qy),
+                ],
+                [
+                    2 * (qx * qy + qw * qz),
+                    1 - 2 * (qx ** 2 + qz ** 2),
+                    2 * (qy * qz - qw * qx),
+                ],
+                [
+                    2 * (qx * qz - qw * qy),
+                    2 * (qy * qz + qw * qx),
+                    1 - 2 * (qx ** 2 + qy ** 2),
+                ],
+            ]
+        )
 
     else:
         rot_mat = cs.vertcat(
-            cs.horzcat(1 - 2 * (qy ** 2 + qz ** 2), 2 * (qx * qy - qw * qz), 2 * (qx * qz + qw * qy)),
-            cs.horzcat(2 * (qx * qy + qw * qz), 1 - 2 * (qx ** 2 + qz ** 2), 2 * (qy * qz - qw * qx)),
-            cs.horzcat(2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx ** 2 + qy ** 2)))
+            cs.horzcat(
+                1 - 2 * (qy ** 2 + qz ** 2),
+                2 * (qx * qy - qw * qz),
+                2 * (qx * qz + qw * qy),
+            ),
+            cs.horzcat(
+                2 * (qx * qy + qw * qz),
+                1 - 2 * (qx ** 2 + qz ** 2),
+                2 * (qy * qz - qw * qx),
+            ),
+            cs.horzcat(
+                2 * (qx * qz - qw * qy),
+                2 * (qy * qz + qw * qx),
+                1 - 2 * (qx ** 2 + qy ** 2),
+            ),
+        )
 
     return rot_mat
 
@@ -384,7 +433,9 @@ def undo_quaternion_flip(q_past, q_current):
     :return: q_current with the flip removed if necessary
     """
 
-    if np.sqrt(np.sum((q_past - q_current) ** 2)) > np.sqrt(np.sum((q_past + q_current) ** 2)):
+    if np.sqrt(np.sum((q_past - q_current) ** 2)) > np.sqrt(
+        np.sum((q_past + q_current) ** 2)
+    ):
         return -q_current
     return q_current
 
@@ -398,16 +449,21 @@ def skew_symmetric(v):
     """
 
     if isinstance(v, np.ndarray):
-        return np.array([[0, -v[0], -v[1], -v[2]],
-                         [v[0], 0, v[2], -v[1]],
-                         [v[1], -v[2], 0, v[0]],
-                         [v[2], v[1], -v[0], 0]])
+        return np.array(
+            [
+                [0, -v[0], -v[1], -v[2]],
+                [v[0], 0, v[2], -v[1]],
+                [v[1], -v[2], 0, v[0]],
+                [v[2], v[1], -v[0], 0],
+            ]
+        )
 
     return cs.vertcat(
         cs.horzcat(0, -v[0], -v[1], -v[2]),
         cs.horzcat(v[0], 0, v[2], -v[1]),
         cs.horzcat(v[1], -v[2], 0, v[0]),
-        cs.horzcat(v[2], v[1], -v[0], 0))
+        cs.horzcat(v[2], v[1], -v[0], 0),
+    )
 
 
 def decompose_quaternion(q):
@@ -480,7 +536,13 @@ def prune_dataset(x, y, x_cap, bins, thresh, plot, labels=None):
             plt.subplot(y.shape[1] + 1, 1, i + 1)
             h, bins = np.histogram(y[:, i], bins=n_bins)
             plot_bins.append(bins)
-            plt.bar(bins[:-1], h, np.ones_like(h) * (bins[1] - bins[0]), align='edge', label='discarded')
+            plt.bar(
+                bins[:-1],
+                h,
+                np.ones_like(h) * (bins[1] - bins[0]),
+                align="edge",
+                label="discarded",
+            )
             if labels is not None:
                 plt.ylabel(labels[i])
 
@@ -497,21 +559,31 @@ def prune_dataset(x, y, x_cap, bins, thresh, plot, labels=None):
         h, bins = np.histogram(y[:, i], bins=n_bins)
         for j in range(len(h)):
             if h[j] / np.sum(h) < thresh:
-                pruned_idx = np.where(np.logical_and(bins[j + 1] >= y[:, i], y[:, i] >= bins[j]))
+                pruned_idx = np.where(
+                    np.logical_and(bins[j + 1] >= y[:, i], y[:, i] >= bins[j])
+                )
                 pruned_idx_unique = np.unique(np.append(pruned_idx, pruned_idx_unique))
 
-    y_norm = np.sqrt(np.sum(y ** 2, 1))
+    y_norm = np.sqrt(np.sum(y**2, 1))
 
     # Prune by error histogram norm
     h, error_bins = np.histogram(y_norm, bins=n_bins)
     h = h / np.sum(h)
     if plot:
         plt.subplot(y.shape[1] + 1, 1, y.shape[1] + 1)
-        plt.bar(error_bins[:-1], h, np.ones_like(h) * (error_bins[1] - error_bins[0]), align='edge', label='discarded')
+        plt.bar(
+            error_bins[:-1],
+            h,
+            np.ones_like(h) * (error_bins[1] - error_bins[0]),
+            align="edge",
+            label="discarded",
+        )
 
     for j in range(len(h)):
         if h[j] / np.sum(h) < thresh:
-            pruned_idx = np.where(np.logical_and(error_bins[j + 1] >= y_norm, y_norm >= error_bins[j]))
+            pruned_idx = np.where(
+                np.logical_and(error_bins[j + 1] >= y_norm, y_norm >= error_bins[j])
+            )
             pruned_idx_unique = np.unique(np.append(pruned_idx, pruned_idx_unique))
 
     y = np.delete(y, pruned_idx_unique, axis=0)
@@ -520,14 +592,26 @@ def prune_dataset(x, y, x_cap, bins, thresh, plot, labels=None):
         for i in range(y.shape[1]):
             plt.subplot(y.shape[1] + 1, 1, i + 1)
             h, bins = np.histogram(y[:, i], bins=plot_bins[i])
-            plt.bar(bins[:-1], h, np.ones_like(h) * (bins[1] - bins[0]), align='edge', label='kept')
+            plt.bar(
+                bins[:-1],
+                h,
+                np.ones_like(h) * (bins[1] - bins[0]),
+                align="edge",
+                label="kept",
+            )
             plt.legend()
 
         plt.subplot(y.shape[1] + 1, 1, y.shape[1] + 1)
-        h, bins = np.histogram(np.sqrt(np.sum(y ** 2, 1)), bins=error_bins)
+        h, bins = np.histogram(np.sqrt(np.sum(y**2, 1)), bins=error_bins)
         h = h / sum(h)
-        plt.bar(bins[:-1], h, np.ones_like(h) * (bins[1] - bins[0]), align='edge', label='kept')
-        plt.ylabel('Error norm')
+        plt.bar(
+            bins[:-1],
+            h,
+            np.ones_like(h) * (bins[1] - bins[0]),
+            align="edge",
+            label="kept",
+        )
+        plt.ylabel("Error norm")
 
     kept_idx = np.delete(np.arange(0, original_length), pruned_idx_unique)
     return kept_idx
@@ -606,8 +690,15 @@ def distance_maximizing_points_2d(points, n_train_points, dense_gp, plot=False):
         for i in range(n_clusters):
             cluster_points = points[np.where(kmeans == i)]
             plt.scatter(cluster_points[:, 0], cluster_points[:, 1])
-        plt.scatter(points[closest_points, 0], points[closest_points, 1], marker='*', facecolors='w',
-                    edgecolors='k', s=100, label='selected')
+        plt.scatter(
+            points[closest_points, 0],
+            points[closest_points, 1],
+            marker="*",
+            facecolors="w",
+            edgecolors="k",
+            s=100,
+            label="selected",
+        )
         plt.legend()
         plt.show()
 
@@ -618,7 +709,9 @@ def distance_maximizing_points_2d(points, n_train_points, dense_gp, plot=False):
     return closest_points
 
 
-def distance_maximizing_points(x_values, center, n_train_points=7, dense_gp=None, plot=False):
+def distance_maximizing_points(
+    x_values, center, n_train_points=7, dense_gp=None, plot=False
+):
     if x_values.shape[1] == 1:
         return distance_maximizing_points_1d(x_values, n_train_points, dense_gp)
 
@@ -641,14 +734,29 @@ def distance_maximizing_points(x_values, center, n_train_points=7, dense_gp=None
 
     centroids = np.array([[center[0], center[1], center[2]]])
 
-    pyramids = np.array([[p_max[0], center[1], center[2]], [center[0], p_max[1], center[2]],
-                         [center[0], center[1], p_max[2]], [p_min[0], center[1], center[2]],
-                         [center[0], p_min[1], center[2]], [center[0], center[1], p_min[2]]])
+    pyramids = np.array(
+        [
+            [p_max[0], center[1], center[2]],
+            [center[0], p_max[1], center[2]],
+            [center[0], center[1], p_max[2]],
+            [p_min[0], center[1], center[2]],
+            [center[0], p_min[1], center[2]],
+            [center[0], center[1], p_min[2]],
+        ]
+    )
 
-    cuboid = np.array([[p_max[0], p_max[1], p_max[2]], [p_max[0], p_max[1], p_min[2]],
-                       [p_max[0], p_min[1], p_max[2]], [p_max[0], p_min[1], p_min[2]],
-                       [p_min[0], p_max[1], p_max[2]], [p_min[0], p_max[1], p_min[2]],
-                       [p_min[0], p_min[1], p_max[2]], [p_min[0], p_min[1], p_min[2]]])
+    cuboid = np.array(
+        [
+            [p_max[0], p_max[1], p_max[2]],
+            [p_max[0], p_max[1], p_min[2]],
+            [p_max[0], p_min[1], p_max[2]],
+            [p_max[0], p_min[1], p_min[2]],
+            [p_min[0], p_max[1], p_max[2]],
+            [p_min[0], p_max[1], p_min[2]],
+            [p_min[0], p_min[1], p_max[2]],
+            [p_min[0], p_min[1], p_min[2]],
+        ]
+    )
 
     if n_train_points >= 15:
         centroids = np.concatenate((centroids, pyramids, cuboid), axis=0)
@@ -683,24 +791,53 @@ def distance_maximizing_points(x_values, center, n_train_points=7, dense_gp=None
 
         fig = plt.figure()
 
-        ax = fig.add_subplot(122, projection='3d')
-        ax.scatter(points_pca[:, 0], points_pca[:, 1], points_pca[:, 2], 'b', label='data')
+        ax = fig.add_subplot(122, projection="3d")
+        ax.scatter(
+            points_pca[:, 0], points_pca[:, 1], points_pca[:, 2], "b", label="data"
+        )
 
-        ax.scatter(centroids[0, 0], centroids[0, 1], centroids[0, 2], s=50, label='center')
-        ax.scatter(centroids[1:, 0], centroids[1:, 1], centroids[1:, 2], s=50, label='centroids')
-        ax.scatter(points_pca[closest_points, 0], points_pca[closest_points, 1], points_pca[closest_points, 2],
-                   s=50, label='selected')
-        ax.set_title('PCA space')
+        ax.scatter(
+            centroids[0, 0], centroids[0, 1], centroids[0, 2], s=50, label="center"
+        )
+        ax.scatter(
+            centroids[1:, 0],
+            centroids[1:, 1],
+            centroids[1:, 2],
+            s=50,
+            label="centroids",
+        )
+        ax.scatter(
+            points_pca[closest_points, 0],
+            points_pca[closest_points, 1],
+            points_pca[closest_points, 2],
+            s=50,
+            label="selected",
+        )
+        ax.set_title("PCA space")
         ax.legend()
 
-        ax = fig.add_subplot(121, projection='3d')
-        ax.scatter(x_values[:, 0], x_values[:, 1], x_values[:, 2], 'b', label='data')
+        ax = fig.add_subplot(121, projection="3d")
+        ax.scatter(x_values[:, 0], x_values[:, 1], x_values[:, 2], "b", label="data")
 
         closest_points_x = x_values[closest_points]
-        ax.scatter(centroids_[0, 0], centroids_[0, 1], centroids_[0, 2], s=50, label='center')
-        ax.scatter(centroids_[1:, 0], centroids_[1:, 1], centroids_[1:, 2], s=50, label='centroids')
-        ax.scatter(closest_points_x[:, 0], closest_points_x[:, 1], closest_points_x[:, 2], s=50, label='selected')
-        ax.set_title('Data space')
+        ax.scatter(
+            centroids_[0, 0], centroids_[0, 1], centroids_[0, 2], s=50, label="center"
+        )
+        ax.scatter(
+            centroids_[1:, 0],
+            centroids_[1:, 1],
+            centroids_[1:, 2],
+            s=50,
+            label="centroids",
+        )
+        ax.scatter(
+            closest_points_x[:, 0],
+            closest_points_x[:, 1],
+            closest_points_x[:, 2],
+            s=50,
+            label="selected",
+        )
+        ax.set_title("Data space")
         ax.legend()
         plt.show()
 
@@ -727,17 +864,21 @@ def sample_random_points(points, used_idx, points_to_sample, dense_gp=None):
 
     # Compute histogram of data
     a, b = np.histogramdd(points[gp_i_free_points, :], bins)
-    assignments = [np.minimum(np.digitize(points[gp_i_free_points, j], bins=b[j]) - 1, bins - 1)
-                   for j in range(points.shape[1])]
+    assignments = [
+        np.minimum(np.digitize(points[gp_i_free_points, j], bins=b[j]) - 1, bins - 1)
+        for j in range(points.shape[1])
+    ]
 
     # Compute probability distribution based on inverse histogram
     probs = np.max(a) - a[tuple(assignments)]
     probs = probs / sum(probs)
 
     try:
-        gp_i_free_points = np.random.choice(gp_i_free_points, n_samples, p=probs, replace=False)
+        gp_i_free_points = np.random.choice(
+            gp_i_free_points, n_samples, p=probs, replace=False
+        )
     except ValueError:
-        print('a')
+        print("a")
     used_idx = np.append(used_idx, gp_i_free_points)
 
     return used_idx
@@ -758,12 +899,14 @@ def parse_xacro_file(xacro):
         # Get attributes
         attributes = node.attrib
 
-        if 'value' in attributes.keys():
-            attrib_dict[attributes['name']] = attributes['value']
+        if "value" in attributes.keys():
+            attrib_dict[attributes["name"]] = attributes["value"]
 
         if node.getchildren():
             try:
-                attrib_dict[attributes['name']] = [child.attrib for child in node.getchildren()]
+                attrib_dict[attributes["name"]] = [
+                    child.attrib for child in node.getchildren()
+                ]
             except:
                 continue
 
@@ -820,7 +963,9 @@ def quaternion_state_mse(x, x_ref, mask):
     """
 
     q_error = q_dot_q(x[3:7], quaternion_inverse(x_ref[3:7]))
-    e = np.concatenate((x[:3] - x_ref[:3], q_error[1:], x[7:10] - x_ref[7:10], x[10:] - x_ref[10:]))
+    e = np.concatenate(
+        (x[:3] - x_ref[:3], q_error[1:], x[7:10] - x_ref[7:10], x[10:] - x_ref[10:])
+    )
 
     return np.sqrt((e * np.array(mask)).dot(e))
 
@@ -837,5 +982,4 @@ def separate_variables(traj):
     p_traj = traj[:, :3]
     a_traj = traj[:, 3:7]
     v_traj = traj[:, 7:10]
-    r_traj = traj[:, 10:]
-    return [p_traj, a_traj, v_traj, r_traj]
+    return [p_traj, a_traj, v_traj]
