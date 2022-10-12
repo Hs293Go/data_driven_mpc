@@ -19,21 +19,48 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.mixture import GaussianMixture
-
-from src.model_fitting.gp import GPEnsemble, CustomGPRegression as npGPRegression
-from src.utils.utils import undo_jsonify, prune_dataset, safe_mknode_recursive, get_data_dir_and_file, \
-    separate_variables, v_dot_q, quaternion_inverse
+from src.model_fitting.gp import CustomGPRegression as npGPRegression
+from src.model_fitting.gp import GPEnsemble
+from src.utils.utils import (
+    get_data_dir_and_file,
+    prune_dataset,
+    quaternion_inverse,
+    safe_mknode_recursive,
+    separate_variables,
+    undo_jsonify,
+    v_dot_q,
+)
 from src.utils.visualization import visualize_data_distribution
 
 
 class GPDataset:
-    def __init__(self, raw_ds=None,
-                 x_features=None, u_features=None, y_dim=None,
-                 cap=None, n_bins=None, thresh=None,
-                 visualize_data=False):
+    def __init__(
+        self,
+        raw_ds=None,
+        x_features=None,
+        u_features=None,
+        y_dim=None,
+        cap=None,
+        n_bins=None,
+        thresh=None,
+        visualize_data=False,
+    ):
 
-        self.data_labels = [r'$p_x$', r'$p_y$', r'$p_z$', r'$q_w$', r'$q_x$', r'$q_y$', r'$q_z$',
-                            r'$v_x$', r'$v_y$', r'$v_z$', r'$w_x$', r'$w_y$', r'$w_z$']
+        self.data_labels = [
+            r"$p_x$",
+            r"$p_y$",
+            r"$p_z$",
+            r"$q_w$",
+            r"$q_x$",
+            r"$q_y$",
+            r"$q_z$",
+            r"$v_x$",
+            r"$v_y$",
+            r"$v_z$",
+            r"$w_x$",
+            r"$w_y$",
+            r"$w_z$",
+        ]
 
         # Raw dataset data
         self.x_raw = None
@@ -66,10 +93,10 @@ class GPDataset:
             self.prune()
 
     def load_data(self, ds):
-        x_raw = undo_jsonify(ds['state_in'].to_numpy())
-        x_out = undo_jsonify(ds['state_out'].to_numpy())
-        x_pred = undo_jsonify(ds['state_pred'].to_numpy())
-        u_raw = undo_jsonify(ds['input_in'].to_numpy())
+        x_raw = undo_jsonify(ds["state_in"].to_numpy())
+        x_out = undo_jsonify(ds["state_out"].to_numpy())
+        x_pred = undo_jsonify(ds["state_pred"].to_numpy())
+        u_raw = undo_jsonify(ds["input_in"].to_numpy())
 
         dt = ds["dt"].to_numpy()
         invalid = np.where(dt == 0)
@@ -108,8 +135,17 @@ class GPDataset:
 
             prune_x_data = self.get_x(pruned=False, raw=True)[:, x_interest]
             prune_y_data = self.get_y(pruned=False, raw=True)[:, y_interest]
-            self.pruned_idx.append(prune_dataset(prune_x_data, prune_y_data, self.cap, self.n_bins, self.thresh,
-                                                 plot=self.plot, labels=labels))
+            self.pruned_idx.append(
+                prune_dataset(
+                    prune_x_data,
+                    prune_y_data,
+                    self.cap,
+                    self.n_bins,
+                    self.thresh,
+                    plot=self.plot,
+                    labels=labels,
+                )
+            )
 
     def get_x(self, cluster=None, pruned=True, raw=False):
 
@@ -122,7 +158,11 @@ class GPDataset:
         if self.x_features is not None and self.u_features is not None:
             x_f = self.x_features
             u_f = self.u_features
-            data = np.concatenate((self.x_raw[:, x_f], self.u_raw[:, u_f]), axis=1) if u_f else self.x_raw[:, x_f]
+            data = (
+                np.concatenate((self.x_raw[:, x_f], self.u_raw[:, u_f]), axis=1)
+                if u_f
+                else self.x_raw[:, x_f]
+            )
         else:
             data = np.concatenate((self.x_raw, self.u_raw), axis=1)
         data = data[:, np.newaxis] if len(data.shape) == 1 else data
@@ -162,7 +202,11 @@ class GPDataset:
         if raw:
             return self.u_raw[tuple(self.pruned_idx)] if pruned else self.u_raw
 
-        data = self.u_raw[:, self.u_features] if self.u_features is not None else self.u_raw
+        data = (
+            self.u_raw[:, self.u_features]
+            if self.u_features is not None
+            else self.u_raw
+        )
         data = data[:, np.newaxis] if len(data.shape) == 1 else data
 
         if pruned or cluster is not None:
@@ -199,9 +243,15 @@ class GPDataset:
     def get_x_pred(self, pruned=True, raw=False):
 
         if raw:
-            return self.x_pred_raw[tuple(self.pruned_idx)] if pruned else self.x_pred_raw
+            return (
+                self.x_pred_raw[tuple(self.pruned_idx)] if pruned else self.x_pred_raw
+            )
 
-        data = self.x_pred_raw[:, self.y_dim] if self.y_dim is not None else self.x_pred_raw
+        data = (
+            self.x_pred_raw[:, self.y_dim]
+            if self.y_dim is not None
+            else self.x_pred_raw
+        )
         data = data[:, np.newaxis] if len(data.shape) == 1 else data
 
         if pruned:
@@ -221,21 +271,29 @@ class GPDataset:
     def dt(self):
         return self.get_dt()
 
-    def cluster(self, n_clusters, load_clusters=False, save_dir="", visualize_data=False):
+    def cluster(
+        self, n_clusters, load_clusters=False, save_dir="", visualize_data=False
+    ):
         self.n_clusters = n_clusters
 
         x_pruned = self.x
         y_pruned = self.y
 
-        file_name = os.path.join(save_dir, 'gmm.pkl')
+        file_name = os.path.join(save_dir, "gmm.pkl")
         loaded = False
         gmm = None
         if os.path.exists(file_name) and load_clusters:
-            print("Loaded GP clusters from last GP training session. File: {}".format(file_name))
+            print(
+                "Loaded GP clusters from last GP training session. File: {}".format(
+                    file_name
+                )
+            )
             gmm = joblib.load(file_name)
             if gmm.n_components != n_clusters:
-                print("The loaded GP does not coincide with the number of set clusters: Found {} but requested"
-                      "is {}".format(gmm.n_components, n_clusters))
+                print(
+                    "The loaded GP does not coincide with the number of set clusters: Found {} but requested"
+                    "is {}".format(gmm.n_components, n_clusters)
+                )
             else:
                 loaded = True
         if not loaded:
@@ -244,7 +302,7 @@ class GPDataset:
         centroids = gmm.means_
 
         if not load_clusters and n_clusters > 1:
-            safe_mknode_recursive(save_dir, 'gmm.pkl', overwrite=True)
+            safe_mknode_recursive(save_dir, "gmm.pkl", overwrite=True)
             joblib.dump(gmm, file_name)
 
         index_aux = np.arange(0, clusters.shape[0])
@@ -258,14 +316,19 @@ class GPDataset:
             clusters_[index_aux, top_1] *= 0
             top_2 = np.argmax(clusters_, 1)
             idx = np.where(top_1 == cluster)[0]
-            idx = np.append(idx, np.where((top_2 == cluster) * (clusters_[index_aux, top_2] > 0.2))[0])
+            idx = np.append(
+                idx,
+                np.where((top_2 == cluster) * (clusters_[index_aux, top_2] > 0.2))[0],
+            )
             cluster_agency[cluster] = idx
 
         # Only works in len(x_features) >= 3
         if visualize_data:
             x_aux = self.get_x(pruned=False)
             y_aux = self.get_y(pruned=False)
-            visualize_data_distribution(x_aux, y_aux, cluster_agency, x_pruned, y_pruned)
+            visualize_data_distribution(
+                x_aux, y_aux, cluster_agency, x_pruned, y_pruned
+            )
 
         self.cluster_agency = cluster_agency
         self.centroids = centroids
@@ -280,19 +343,25 @@ def restore_gp_regressors(pre_trained_models):
 
     gp_reg_ensemble = GPEnsemble()
     # TODO: Deprecate compatibility mode with old models.
-    if all(item in list(pre_trained_models.keys()) for item in ["x_features", "u_features"]):
+    if all(
+        item in list(pre_trained_models.keys()) for item in ["x_features", "u_features"]
+    ):
         x_features = pre_trained_models["x_features"]
         u_features = pre_trained_models["u_features"]
     else:
         x_features = u_features = None
 
-    if isinstance(pre_trained_models['models'][0], dict):
+    if isinstance(pre_trained_models["models"][0], dict):
         pre_trained_gp_reg = {}
-        for _, model_dict in enumerate(pre_trained_models['models']):
+        for _, model_dict in enumerate(pre_trained_models["models"]):
             if x_features is not None:
                 gp_reg = npGPRegression(x_features, u_features, model_dict["reg_dim"])
             else:
-                gp_reg = npGPRegression(model_dict["x_features"], model_dict["u_features"], model_dict["reg_dim"])
+                gp_reg = npGPRegression(
+                    model_dict["x_features"],
+                    model_dict["u_features"],
+                    model_dict["reg_dim"],
+                )
             gp_reg.load(model_dict)
             if model_dict["reg_dim"] not in pre_trained_gp_reg.keys():
                 pre_trained_gp_reg[model_dict["reg_dim"]] = [gp_reg]
@@ -316,7 +385,9 @@ def read_dataset(name, train_split, sim_options):
     :param sim_options: Dictionary of metadata of the dataset to be read.
     :return:
     """
-    data_file = get_data_dir_and_file(name, training_split=train_split, params=sim_options, read_only=True)
+    data_file = get_data_dir_and_file(
+        name, training_split=train_split, params=sim_options, read_only=True
+    )
     if data_file is None:
         raise FileNotFoundError
     rec_file_dir, rec_file_name = data_file

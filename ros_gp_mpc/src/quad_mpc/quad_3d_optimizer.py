@@ -13,23 +13,39 @@ this program. If not, see <http://www.gnu.org/licenses/>.
 
 
 import os
-import sys
 import shutil
+import sys
+from copy import copy
+
 import casadi as cs
 import numpy as np
-from copy import copy
-from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel
-from src.quad_mpc.quad_3d import Quadrotor3D
+from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 from src.model_fitting.gp import GPEnsemble
-from src.utils.utils import skew_symmetric, v_dot_q, safe_mkdir_recursive, quaternion_inverse
+from src.quad_mpc.quad_3d import Quadrotor3D
 from src.utils.quad_3d_opt_utils import discretize_dynamics_and_cost
+from src.utils.utils import (
+    quaternion_inverse,
+    safe_mkdir_recursive,
+    skew_symmetric,
+    v_dot_q,
+)
 
 
 class Quad3DOptimizer:
-    def __init__(self, quad, t_horizon=1, n_nodes=20,
-                 q_cost=None, r_cost=None, q_mask=None,
-                 B_x=None, gp_regressors=None, rdrv_d_mat=None,
-                 model_name="quad_3d_acados_mpc", solver_options=None):
+    def __init__(
+        self,
+        quad,
+        t_horizon=1,
+        n_nodes=20,
+        q_cost=None,
+        r_cost=None,
+        q_mask=None,
+        B_x=None,
+        gp_regressors=None,
+        rdrv_d_mat=None,
+        model_name="quad_3d_acados_mpc",
+        solver_options=None,
+    ):
         """
         :param quad: quadrotor object
         :type quad: Quadrotor3D
@@ -49,7 +65,9 @@ class Quad3DOptimizer:
 
         # Weighted squared error loss function q = (p_xyz, a_xyz, v_xyz, r_xyz), r = (u1, u2, u3, u4)
         if q_cost is None:
-            q_cost = np.array([10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05])
+            q_cost = np.array(
+                [10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+            )
         if r_cost is None:
             r_cost = np.array([0.1, 0.1, 0.1, 0.1])
 
@@ -62,20 +80,20 @@ class Quad3DOptimizer:
         self.min_u = quad.min_input_value
 
         # Declare model variables
-        self.p = cs.MX.sym('p', 3)  # position
-        self.q = cs.MX.sym('a', 4)  # angle quaternion (wxyz)
-        self.v = cs.MX.sym('v', 3)  # velocity
-        self.r = cs.MX.sym('r', 3)  # angle rate
+        self.p = cs.MX.sym("p", 3)  # position
+        self.q = cs.MX.sym("a", 4)  # angle quaternion (wxyz)
+        self.v = cs.MX.sym("v", 3)  # velocity
+        self.r = cs.MX.sym("r", 3)  # angle rate
 
         # Full state vector (13-dimensional)
         self.x = cs.vertcat(self.p, self.q, self.v, self.r)
         self.state_dim = 13
 
         # Control input vector
-        u1 = cs.MX.sym('u1')
-        u2 = cs.MX.sym('u2')
-        u3 = cs.MX.sym('u3')
-        u4 = cs.MX.sym('u4')
+        u1 = cs.MX.sym("u1")
+        u2 = cs.MX.sym("u2")
+        u3 = cs.MX.sym("u3")
+        u4 = cs.MX.sym("u4")
         self.u = cs.vertcat(u1, u2, u3, u4)
 
         # Nominal model equations symbolic function (no GP)
@@ -107,27 +125,30 @@ class Quad3DOptimizer:
 
         # Declare model variables for GP prediction (only used in real quadrotor flight with EKF estimator).
         # Will be used as initial state for GP prediction as Acados parameters.
-        self.gp_p = cs.MX.sym('gp_p', 3)
-        self.gp_q = cs.MX.sym('gp_a', 4)
-        self.gp_v = cs.MX.sym('gp_v', 3)
-        self.gp_r = cs.MX.sym('gp_r', 3)
+        self.gp_p = cs.MX.sym("gp_p", 3)
+        self.gp_q = cs.MX.sym("gp_a", 4)
+        self.gp_v = cs.MX.sym("gp_v", 3)
+        self.gp_r = cs.MX.sym("gp_r", 3)
         self.gp_x = cs.vertcat(self.gp_p, self.gp_q, self.gp_v, self.gp_r)
 
         # The trigger variable is used to tell ACADOS to use the additional GP state estimate in the first optimization
         # node and the regular integrated state in the rest
-        self.trigger_var = cs.MX.sym('trigger', 1)
+        self.trigger_var = cs.MX.sym("trigger", 1)
 
         # Build full model. Will have 13 variables. self.dyn_x contains the symbolic variable that
         # should be used to evaluate the dynamics function. It corresponds to self.x if there are no GP's, or
         # self.x_with_gp otherwise
         acados_models, nominal_with_gp = self.acados_setup_model(
-            self.quad_xdot_nominal(x=self.x, u=self.u)['x_dot'], model_name)
+            self.quad_xdot_nominal(x=self.x, u=self.u)["x_dot"], model_name
+        )
 
         # Convert dynamics variables to functions of the state and input vectors
         self.quad_xdot = {}
         for dyn_model_idx in nominal_with_gp.keys():
             dyn = nominal_with_gp[dyn_model_idx]
-            self.quad_xdot[dyn_model_idx] = cs.Function('x_dot', [self.x, self.u], [dyn], ['x', 'u'], ['x_dot'])
+            self.quad_xdot[dyn_model_idx] = cs.Function(
+                "x_dot", [self.x, self.u], [dyn], ["x", "u"], ["x_dot"]
+            )
 
         # ### Setup and compile Acados OCP solvers ### #
         self.acados_ocp_solver = {}
@@ -136,14 +157,16 @@ class Quad3DOptimizer:
         self.with_gp = self.gp_reg_ensemble is not None
 
         # Add one more weight to the rotation (use quaternion norm weighting in acados)
-        q_diagonal = np.concatenate((q_cost[:3], np.mean(q_cost[3:6])[np.newaxis], q_cost[3:]))
+        q_diagonal = np.concatenate(
+            (q_cost[:3], np.mean(q_cost[3:6])[np.newaxis], q_cost[3:])
+        )
         if q_mask is not None:
             q_mask = np.concatenate((q_mask[:3], np.zeros(1), q_mask[3:]))
             q_diagonal *= q_mask
 
         # Ensure current working directory is current folder
         os.chdir(os.path.dirname(os.path.realpath(__file__)))
-        self.acados_models_dir = '../../acados_models'
+        self.acados_models_dir = "../../acados_models"
         safe_mkdir_recursive(os.path.join(os.getcwd(), self.acados_models_dir))
 
         for key, key_model in zip(acados_models.keys(), acados_models.values()):
@@ -152,13 +175,13 @@ class Quad3DOptimizer:
             ny = nx + nu
             n_param = key_model.p.size()[0] if isinstance(key_model.p, cs.MX) else 0
 
-            acados_source_path = os.environ['ACADOS_SOURCE_DIR']
-            sys.path.insert(0, '../common')
+            acados_source_path = os.environ["ACADOS_SOURCE_DIR"]
+            sys.path.insert(0, "../common")
 
             # Create OCP object to formulate the optimization
             ocp = AcadosOcp()
-            ocp.acados_include_path = acados_source_path + '/include'
-            ocp.acados_lib_path = acados_source_path + '/lib'
+            ocp.acados_include_path = acados_source_path + "/include"
+            ocp.acados_lib_path = acados_source_path + "/lib"
             ocp.model = key_model
             ocp.dims.N = self.N
             ocp.solver_options.tf = t_horizon
@@ -167,12 +190,16 @@ class Quad3DOptimizer:
             ocp.dims.np = n_param
             ocp.parameter_values = np.zeros(n_param)
 
-            ocp.cost.cost_type = 'LINEAR_LS'
-            ocp.cost.cost_type_e = 'LINEAR_LS'
+            ocp.cost.cost_type = "LINEAR_LS"
+            ocp.cost.cost_type_e = "LINEAR_LS"
 
             ocp.cost.W = np.diag(np.concatenate((q_diagonal, r_cost)))
             ocp.cost.W_e = np.diag(q_diagonal)
-            terminal_cost = 0 if solver_options is None or not solver_options["terminal_cost"] else 1
+            terminal_cost = (
+                0
+                if solver_options is None or not solver_options["terminal_cost"]
+                else 1
+            )
             ocp.cost.W_e *= terminal_cost
 
             ocp.cost.Vx = np.zeros((ny, nx))
@@ -196,14 +223,18 @@ class Quad3DOptimizer:
             ocp.constraints.idxbu = np.array([0, 1, 2, 3])
 
             # Solver options
-            ocp.solver_options.qp_solver = 'FULL_CONDENSING_HPIPM'
-            ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
-            ocp.solver_options.integrator_type = 'ERK'
+            ocp.solver_options.qp_solver = "FULL_CONDENSING_HPIPM"
+            ocp.solver_options.hessian_approx = "GAUSS_NEWTON"
+            ocp.solver_options.integrator_type = "ERK"
             ocp.solver_options.print_level = 0
-            ocp.solver_options.nlp_solver_type = 'SQP_RTI' if solver_options is None else solver_options["solver_type"]
+            ocp.solver_options.nlp_solver_type = (
+                "SQP_RTI" if solver_options is None else solver_options["solver_type"]
+            )
 
             # Compile acados OCP solver if necessary
-            json_file = os.path.join(self.acados_models_dir, key_model.name + '_acados_ocp.json')
+            json_file = os.path.join(
+                self.acados_models_dir, key_model.name + "_acados_ocp.json"
+            )
             self.acados_ocp_solver[key] = AcadosOcpSolver(ocp, json_file=json_file)
 
     def clear_acados_model(self):
@@ -211,10 +242,10 @@ class Quad3DOptimizer:
         Removes previous stored acados models to avoid name conflicts.
         """
 
-        json_file = os.path.join(self.acados_models_dir, 'acados_ocp.json')
+        json_file = os.path.join(self.acados_models_dir, "acados_ocp.json")
         if os.path.exists(json_file):
             os.remove(os.path.join(os.getcwd(), json_file))
-        compiled_model_dir = os.path.join(os.getcwd(), 'c_generated_code')
+        compiled_model_dir = os.path.join(os.getcwd(), "c_generated_code")
         if os.path.exists(compiled_model_dir):
             shutil.rmtree(compiled_model_dir)
 
@@ -236,7 +267,7 @@ class Quad3DOptimizer:
         for i, dim in enumerate(real_pred_dims):
             if dim not in pred_dims:
                 for k, v in zip(gp_outs.keys(), gp_outs.values()):
-                    if (isinstance(v, cs.MX) or isinstance(v, cs.DM)) and k == 'pred':
+                    if (isinstance(v, cs.MX) or isinstance(v, cs.DM)) and k == "pred":
                         gp_outs[k] = cs.vertcat(v[:i], cs.MX.zeros(1), v[i:])
 
         return gp_outs
@@ -250,7 +281,7 @@ class Quad3DOptimizer:
 
         for i, dim in enumerate(real_pred_dims):
             if dim not in pred_dims:
-                vec = cs.vertcat(vec[:i], vec[i + 1:])
+                vec = cs.vertcat(vec[:i], vec[i + 1 :])
 
         return vec
 
@@ -268,7 +299,7 @@ class Quad3DOptimizer:
 
         def fill_in_acados_model(x, u, p, dynamics, name):
 
-            x_dot = cs.MX.sym('x_dot', dynamics.shape)
+            x_dot = cs.MX.sym("x_dot", dynamics.shape)
             f_impl = x_dot - dynamics
 
             # Dynamics model
@@ -303,8 +334,13 @@ class Quad3DOptimizer:
             # Get number of models in GP
             for i in range(self.gp_reg_ensemble.n_models):
                 # Evaluate cluster of the GP ensemble
-                cluster_id = {k: [v] for k, v in zip(gp_dims, i * np.ones_like(gp_dims, dtype=int))}
-                outs = self.gp_reg_ensemble.predict(gp_x, gp_u, return_cov=False, gp_idx=cluster_id, return_z=False)
+                cluster_id = {
+                    k: [v]
+                    for k, v in zip(gp_dims, i * np.ones_like(gp_dims, dtype=int))
+                }
+                outs = self.gp_reg_ensemble.predict(
+                    gp_x, gp_u, return_cov=False, gp_idx=cluster_id, return_z=False
+                )
 
                 # Unpack prediction outputs. Transform back to world reference frame
                 outs = self.add_missing_states(outs)
@@ -324,7 +360,9 @@ class Quad3DOptimizer:
                 i_name = model_name + "_domain_" + str(i)
 
                 params = cs.vertcat(self.gp_x, self.trigger_var)
-                acados_models[i] = fill_in_acados_model(x=x_, u=self.u, p=params, dynamics=dynamics_, name=i_name)
+                acados_models[i] = fill_in_acados_model(
+                    x=x_, u=self.u, p=params, dynamics=dynamics_, name=i_name
+                )
 
         else:
 
@@ -334,7 +372,9 @@ class Quad3DOptimizer:
             x_ = self.x
             dynamics_ = nominal
 
-            acados_models[0] = fill_in_acados_model(x=x_, u=self.u, p=[], dynamics=dynamics_, name=model_name)
+            acados_models[0] = fill_in_acados_model(
+                x=x_, u=self.u, p=[], dynamics=dynamics_, name=model_name
+            )
 
         return acados_models, dynamics_equations
 
@@ -352,8 +392,15 @@ class Quad3DOptimizer:
         (6x1)
         """
 
-        x_dot = cs.vertcat(self.p_dynamics(), self.q_dynamics(), self.v_dynamics(rdrv_d), self.w_dynamics())
-        return cs.Function('x_dot', [self.x[:13], self.u], [x_dot], ['x', 'u'], ['x_dot'])
+        x_dot = cs.vertcat(
+            self.p_dynamics(),
+            self.q_dynamics(),
+            self.v_dynamics(rdrv_d),
+            self.w_dynamics(),
+        )
+        return cs.Function(
+            "x_dot", [self.x[:13], self.u], [x_dot], ["x", "u"], ["x_dot"]
+        )
 
     def p_dynamics(self):
         return self.v
@@ -369,7 +416,10 @@ class Quad3DOptimizer:
 
         f_thrust = self.u * self.quad.max_thrust
         g = cs.vertcat(0.0, 0.0, 9.81)
-        a_thrust = cs.vertcat(0.0, 0.0, f_thrust[0] + f_thrust[1] + f_thrust[2] + f_thrust[3]) / self.quad.mass
+        a_thrust = (
+            cs.vertcat(0.0, 0.0, f_thrust[0] + f_thrust[1] + f_thrust[2] + f_thrust[3])
+            / self.quad.mass
+        )
 
         v_dynamics = v_dot_q(a_thrust, self.q) - g
 
@@ -388,9 +438,22 @@ class Quad3DOptimizer:
         x_f = cs.MX(self.quad.x_f)
         c_f = cs.MX(self.quad.z_l_tau)
         return cs.vertcat(
-            (cs.mtimes(f_thrust.T, y_f) + (self.quad.J[1] - self.quad.J[2]) * self.r[1] * self.r[2]) / self.quad.J[0],
-            (-cs.mtimes(f_thrust.T, x_f) + (self.quad.J[2] - self.quad.J[0]) * self.r[2] * self.r[0]) / self.quad.J[1],
-            (cs.mtimes(f_thrust.T, c_f) + (self.quad.J[0] - self.quad.J[1]) * self.r[0] * self.r[1]) / self.quad.J[2])
+            (
+                cs.mtimes(f_thrust.T, y_f)
+                + (self.quad.J[1] - self.quad.J[2]) * self.r[1] * self.r[2]
+            )
+            / self.quad.J[0],
+            (
+                -cs.mtimes(f_thrust.T, x_f)
+                + (self.quad.J[2] - self.quad.J[0]) * self.r[2] * self.r[0]
+            )
+            / self.quad.J[1],
+            (
+                cs.mtimes(f_thrust.T, c_f)
+                + (self.quad.J[0] - self.quad.J[1]) * self.r[0] * self.r[1]
+            )
+            / self.quad.J[2],
+        )
 
     def linearized_quad_dynamics(self):
         """
@@ -414,17 +477,37 @@ class Quad3DOptimizer:
         jac[6, 10:] = 1 / 2 * cs.horzcat(-self.q[2], self.q[1], self.q[0])
 
         # Velocity derivatives
-        a_u = (self.u[0] + self.u[1] + self.u[2] + self.u[3]) * self.quad.max_thrust / self.quad.mass
-        jac[7, 3:7] = 2 * cs.horzcat(a_u * self.q[2], a_u * self.q[3], a_u * self.q[0], a_u * self.q[1])
-        jac[8, 3:7] = 2 * cs.horzcat(-a_u * self.q[1], -a_u * self.q[0], a_u * self.q[3], a_u * self.q[2])
+        a_u = (
+            (self.u[0] + self.u[1] + self.u[2] + self.u[3])
+            * self.quad.max_thrust
+            / self.quad.mass
+        )
+        jac[7, 3:7] = 2 * cs.horzcat(
+            a_u * self.q[2], a_u * self.q[3], a_u * self.q[0], a_u * self.q[1]
+        )
+        jac[8, 3:7] = 2 * cs.horzcat(
+            -a_u * self.q[1], -a_u * self.q[0], a_u * self.q[3], a_u * self.q[2]
+        )
         jac[9, 3:7] = 2 * cs.horzcat(0, -2 * a_u * self.q[1], -2 * a_u * self.q[1], 0)
 
         # Rate derivatives
-        jac[10, 10:] = (self.quad.J[1] - self.quad.J[2]) / self.quad.J[0] * cs.horzcat(0, self.r[2], self.r[1])
-        jac[11, 10:] = (self.quad.J[2] - self.quad.J[0]) / self.quad.J[1] * cs.horzcat(self.r[2], 0, self.r[0])
-        jac[12, 10:] = (self.quad.J[0] - self.quad.J[1]) / self.quad.J[2] * cs.horzcat(self.r[1], self.r[0], 0)
+        jac[10, 10:] = (
+            (self.quad.J[1] - self.quad.J[2])
+            / self.quad.J[0]
+            * cs.horzcat(0, self.r[2], self.r[1])
+        )
+        jac[11, 10:] = (
+            (self.quad.J[2] - self.quad.J[0])
+            / self.quad.J[1]
+            * cs.horzcat(self.r[2], 0, self.r[0])
+        )
+        jac[12, 10:] = (
+            (self.quad.J[0] - self.quad.J[1])
+            / self.quad.J[2]
+            * cs.horzcat(self.r[1], self.r[0], 0)
+        )
 
-        return cs.Function('J', [self.x, self.u], [jac])
+        return cs.Function("J", [self.x, self.u], [jac])
 
     def set_reference_state(self, x_target=None, u_target=None):
         """
@@ -471,13 +554,20 @@ class Quad3DOptimizer:
         """
 
         if u_target is not None:
-            assert x_target[0].shape[0] == (u_target.shape[0] + 1) or x_target[0].shape[0] == u_target.shape[0]
+            assert (
+                x_target[0].shape[0] == (u_target.shape[0] + 1)
+                or x_target[0].shape[0] == u_target.shape[0]
+            )
 
         # If not enough states in target sequence, append last state until required length is met
         while x_target[0].shape[0] < self.N + 1:
-            x_target = [np.concatenate((x, np.expand_dims(x[-1, :], 0)), 0) for x in x_target]
+            x_target = [
+                np.concatenate((x, np.expand_dims(x[-1, :], 0)), 0) for x in x_target
+            ]
             if u_target is not None:
-                u_target = np.concatenate((u_target, np.expand_dims(u_target[-1, :], 0)), 0)
+                u_target = np.concatenate(
+                    (u_target, np.expand_dims(u_target[-1, :], 0)), 0
+                )
 
         stacked_x_target = np.concatenate([x for x in x_target], 1)
 
@@ -488,7 +578,9 @@ class Quad3DOptimizer:
 
         # Determine which dynamics model to use based on the GP optimal input feature region
         if self.gp_reg_ensemble is not None:
-            gp_ind = self.gp_reg_ensemble.select_gp(dim=None, x=x_target_mean, u=u_target[int(self.N / 2)])
+            gp_ind = self.gp_reg_ensemble.select_gp(
+                dim=None, x=x_target_mean, u=u_target[int(self.N / 2)]
+            )
         else:
             gp_ind = 0
 
@@ -519,9 +611,13 @@ class Quad3DOptimizer:
         dynamics = self.quad_xdot[use_model] if use_gp else self.quad_xdot_nominal
 
         # Call with self.x_with_gp even if use_gp=False
-        return discretize_dynamics_and_cost(t_horizon, n, m, self.x, self.u, dynamics, self.L, i)
+        return discretize_dynamics_and_cost(
+            t_horizon, n, m, self.x, self.u, dynamics, self.L, i
+        )
 
-    def run_optimization(self, initial_state=None, use_model=0, return_x=False, gp_regression_state=None):
+    def run_optimization(
+        self, initial_state=None, use_model=0, return_x=False, gp_regression_state=None
+    ):
         """
         Optimizes a trajectory to reach the pre-set target state, starting from the input initial state, that minimizes
         the quadratic cost function and respects the constraints of the system
@@ -541,15 +637,21 @@ class Quad3DOptimizer:
         x_init = np.stack(x_init)
 
         # Set initial condition, equality constraint
-        self.acados_ocp_solver[use_model].set(0, 'lbx', x_init)
-        self.acados_ocp_solver[use_model].set(0, 'ubx', x_init)
+        self.acados_ocp_solver[use_model].set(0, "lbx", x_init)
+        self.acados_ocp_solver[use_model].set(0, "ubx", x_init)
 
         # Set parameters
         if self.with_gp:
-            gp_state = gp_regression_state if gp_regression_state is not None else initial_state
-            self.acados_ocp_solver[use_model].set(0, 'p', np.array(gp_state + [1]))
+            gp_state = (
+                gp_regression_state
+                if gp_regression_state is not None
+                else initial_state
+            )
+            self.acados_ocp_solver[use_model].set(0, "p", np.array(gp_state + [1]))
             for j in range(1, self.N):
-                self.acados_ocp_solver[use_model].set(j, 'p', np.array([0.0] * (len(gp_state) + 1)))
+                self.acados_ocp_solver[use_model].set(
+                    j, "p", np.array([0.0] * (len(gp_state) + 1))
+                )
 
         # Solve OCP
         self.acados_ocp_solver[use_model].solve()

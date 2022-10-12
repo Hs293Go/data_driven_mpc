@@ -11,33 +11,40 @@ You should have received a copy of the GNU General Public License along with
 this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
-from src.utils.utils import parse_xacro_file
-from src.quad_mpc.quad_3d import Quadrotor3D
-from src.quad_mpc.quad_3d_mpc import Quad3DMPC
+import os
+
 import numpy as np
+import rospy
 import std_msgs.msg
 from quadrotor_msgs.msg import ControlCommand
-import rospy
-import os
+from src.quad_mpc.quad_3d import Quadrotor3D
+from src.quad_mpc.quad_3d_mpc import Quad3DMPC
+from src.utils.utils import parse_xacro_file
 
 
 def custom_quad_param_loader(quad_name):
 
     this_path = os.path.dirname(os.path.realpath(__file__))
-    params_file = os.path.join(this_path, '..', '..', 'config', quad_name + '.xacro')
+    params_file = os.path.join(this_path, "..", "..", "config", quad_name + ".xacro")
 
     # Get parameters for drone
     attrib = parse_xacro_file(params_file)
 
     quad = Quadrotor3D(noisy=False, drag=False, payload=False, motor_noise=False)
-    quad.mass = float(attrib['mass']) + float(attrib['mass_rotor']) * 4
-    quad.J = np.array([float(attrib['body_inertia'][0]['ixx']),
-                       float(attrib['body_inertia'][0]['iyy']),
-                       float(attrib['body_inertia'][0]['izz'])])
-    quad.length = float(attrib['arm_length'])
+    quad.mass = float(attrib["mass"]) + float(attrib["mass_rotor"]) * 4
+    quad.J = np.array(
+        [
+            float(attrib["body_inertia"][0]["ixx"]),
+            float(attrib["body_inertia"][0]["iyy"]),
+            float(attrib["body_inertia"][0]["izz"]),
+        ]
+    )
+    quad.length = float(attrib["arm_length"])
 
-    quad.max_thrust = float(attrib["max_rot_velocity"]) ** 2 * float(attrib["motor_constant"])
-    quad.c = float(attrib['moment_constant'])
+    quad.max_thrust = float(attrib["max_rot_velocity"]) ** 2 * float(
+        attrib["motor_constant"]
+    )
+    quad.c = float(attrib["moment_constant"])
 
     # x configuration
     if quad_name != "hummingbird":
@@ -56,30 +63,45 @@ def custom_quad_param_loader(quad_name):
 
 
 class ROSGPMPC:
-    def __init__(self, t_horizon, n_mpc_nodes, opt_dt, quad_name, point_reference=False, gp_models=None, rdrv=None):
+    def __init__(
+        self,
+        t_horizon,
+        n_mpc_nodes,
+        opt_dt,
+        quad_name,
+        point_reference=False,
+        gp_models=None,
+        rdrv=None,
+    ):
 
         quad = custom_quad_param_loader(quad_name)
 
         # Initialize quad MPC
         if point_reference:
-            acados_config = {
-                "solver_type": "SQP",
-                "terminal_cost": True
-            }
+            acados_config = {"solver_type": "SQP", "terminal_cost": True}
         else:
-            acados_config = {
-                "solver_type": "SQP_RTI",
-                "terminal_cost": False
-            }
+            acados_config = {"solver_type": "SQP_RTI", "terminal_cost": False}
 
-        q_diagonal = np.array([0.5, 0.5, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.01, 0.01, 0.01])
+        q_diagonal = np.array(
+            [0.5, 0.5, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.01, 0.01, 0.01]
+        )
         r_diagonal = np.array([1.0, 1.0, 1.0, 1.0])
 
         q_mask = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]).T
 
-        quad_mpc = Quad3DMPC(quad, t_horizon=t_horizon, optimization_dt=opt_dt, n_nodes=n_mpc_nodes,
-                             pre_trained_models=gp_models, model_name=quad_name, solver_options=acados_config,
-                             q_mask=q_mask, q_cost=q_diagonal, r_cost=r_diagonal, rdrv_d_mat=rdrv)
+        quad_mpc = Quad3DMPC(
+            quad,
+            t_horizon=t_horizon,
+            optimization_dt=opt_dt,
+            n_nodes=n_mpc_nodes,
+            pre_trained_models=gp_models,
+            model_name=quad_name,
+            solver_options=acados_config,
+            q_mask=q_mask,
+            q_cost=q_diagonal,
+            r_cost=r_diagonal,
+            rdrv_d_mat=rdrv,
+        )
 
         self.quad_name = quad_name
         self.quad = quad
@@ -130,7 +152,9 @@ class ROSGPMPC:
         next_control.header.stamp = rospy.Time.now()
         next_control.control_mode = 2
         next_control.armed = True
-        next_control.collective_thrust = np.sum(w_opt[:4]) * self.quad.max_thrust / self.quad.mass
+        next_control.collective_thrust = (
+            np.sum(w_opt[:4]) * self.quad.max_thrust / self.quad.mass
+        )
         next_control.bodyrates.x = x_opt[1, -3]
         next_control.bodyrates.y = x_opt[1, -2]
         next_control.bodyrates.z = x_opt[1, -1]
