@@ -17,9 +17,9 @@ from operator import itemgetter
 import casadi as cs
 import joblib
 import numpy as np
-from numpy.linalg import cholesky, inv, lstsq
 from scipy.optimize import minimize
 from scipy.spatial.distance import cdist, pdist, squareform
+from scipy.linalg import cho_factor, cho_solve, solve_triangular
 from src.utils.utils import make_bz_matrix, safe_mknode_recursive
 from tqdm import tqdm
 
@@ -263,11 +263,11 @@ class CustomGPRegression:
         self._K_cs = cs.DM(k)
 
     @property
-    def K_inv(self):
+    def K_lower(self):
         return self._K_inv
 
-    @K_inv.setter
-    def K_inv(self, k):
+    @K_lower.setter
+    def K_lower(self, k):
         self._K_inv = k
         self._K_inv_cs = cs.DM(k)
 
@@ -310,13 +310,10 @@ class CustomGPRegression:
         k_train = kernel(self.x_train, self.x_train) + sigma_n ** 2 * np.eye(
             len(self.x_train)
         )
-        l_mat = cholesky(k_train)
+        l_mat, _ = fac = cho_factor(k_train)
         nll = (
             np.sum(np.log(np.diagonal(l_mat)))
-            + 0.5
-            * self.y_train.T.dot(
-                lstsq(l_mat.T, lstsq(l_mat, self.y_train, rcond=None)[0], rcond=None)[0]
-            )
+            + 0.5 * self.y_train.T @ cho_solve(fac, self.y_train)
             + 0.5 * len(self.x_train) * np.log(2 * np.pi)
         )
         return nll
@@ -341,13 +338,10 @@ class CustomGPRegression:
                 self.kernel_type, params={"l": l_params, "sigma_f": sigma_f}
             )
             k_train = kernel(x_train, x_train) + sigma_n ** 2 * np.eye(len(x_train))
-            l_mat = cholesky(k_train)
+            l_mat, _ = fac = cho_factor(k_train)
             nll = (
                 np.sum(np.log(np.diagonal(l_mat)))
-                + 0.5
-                * y_train.T.dot(
-                    lstsq(l_mat.T, lstsq(l_mat, y_train, rcond=None)[0], rcond=None)[0]
-                )
+                + 0.5 * y_train.T @ cho_solve(fac, y_train)
                 + 0.5 * len(x_train) * np.log(2 * np.pi)
             )
             return nll
@@ -375,25 +369,22 @@ class CustomGPRegression:
         initial_guess += [self.sigma_n]
         initial_guess = np.array(initial_guess)
 
-        bounds = [(1e-5, 1e1) for _ in range(len(initial_guess) - 1)]
-        bounds = bounds + [(1e-8, 1e0)]
-        log_bounds = np.log(tuple(bounds))
+        n_params = len(initial_guess)
+        bounds = np.repeat(np.array([[1e-5, 1e1]]), n_params - 1, axis=0)
+        bounds = np.vstack((bounds, (1e-8, 1e0)))
+        log_bounds = np.log(bounds)
 
         y_train -= self.y_mean
 
+        random_state = np.random.default_rng(seed=self._seed)
+        theta_initial = random_state.uniform(
+            log_bounds[:, 0], log_bounds[:, 1], (self.n_restarts - 1, n_params)
+        )
+        theta_initial = np.vstack((initial_guess, theta_initial))
         optima = [
-            self._constrained_minimization(x_train, y_train, initial_guess, log_bounds)
+            self._constrained_minimization(x_train, y_train, it, log_bounds)
+            for it in theta_initial
         ]
-
-        if self.n_restarts > 1:
-            random_state = np.random.default_rng(seed=self._seed)
-            for iteration in range(self.n_restarts - 1):
-                theta_initial = random_state.uniform(log_bounds[:, 0], log_bounds[:, 1])
-                optima.append(
-                    self._constrained_minimization(
-                        x_train, y_train, theta_initial, log_bounds
-                    )
-                )
 
         lml_values = list(map(itemgetter(1), optima))
         theta_opt = optima[int(np.argmin(lml_values))][0]
@@ -410,8 +401,8 @@ class CustomGPRegression:
         self.K = self.kernel(x_train, x_train) + self.sigma_n ** 2 * np.eye(
             len(x_train)
         )
-        self.K_inv = inv(self.K)
-        self.K_inv_y = self.K_inv.dot(y_train)
+        self.K_lower, _ = fac = cho_factor(self.K, lower=True)
+        self.K_inv_y = cho_solve(fac, y_train)
 
         # Update training dataset points
         self.x_train = x_train
@@ -480,11 +471,12 @@ class CustomGPRegression:
         k_ss = self.kernel(x_test, x_test) + 1e-8 * np.eye(len(x_test))
 
         # Posterior mean value
-        mu_s = k_s.dot(self.K_inv_y) + self.y_mean
+        mu_s = k_s @ self.K_inv_y + self.y_mean
 
         # Posterior covariance
-        cov_s = k_ss - k_s.dot(self.K_inv).dot(k_s.T)
-        std_s = np.sqrt(np.diag(cov_s))
+        v = solve_triangular(self.K_lower, k_s.T)
+        cov_s = k_ss - v.T @ v
+        std_s = np.sqrt(np.abs(np.diag(cov_s)))
 
         if not return_std and not return_cov:
             return mu_s
@@ -551,7 +543,7 @@ class CustomGPRegression:
             "x_train": self.x_train,
             "y_train": self.y_train,
             "k_inv_y": self.K_inv_y,
-            "k_inv": self.K_inv,
+            "k_inv": self.K_lower,
             "sigma_n": self.sigma_n,
             "reg_dim": self.reg_dim,
             "x_features": self.x_features,
@@ -574,7 +566,7 @@ class CustomGPRegression:
         :param data_dict: a dictionary with all the pre-trained matrices of the GP regressor
         """
 
-        self.K_inv = data_dict["k_inv"]
+        self.K_lower = data_dict["k_inv"]
         self.K_inv_y = data_dict["k_inv_y"]
         self.x_train = data_dict["x_train"]
         self.y_train = data_dict["y_train"]
