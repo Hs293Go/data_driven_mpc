@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyquaternion
 from config.configuration_parameters import DirectoryConfig as GPConfig
-from scipy.interpolate.interpolate import interp1d
+from scipy.interpolate import interp1d
 from sklearn import preprocessing
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
