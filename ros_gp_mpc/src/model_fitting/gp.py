@@ -18,7 +18,6 @@ import casadi as cs
 import joblib
 import numpy as np
 from numpy.linalg import cholesky, inv, lstsq
-from numpy.random import mtrand
 from scipy.optimize import minimize
 from scipy.spatial.distance import cdist, pdist, squareform
 from src.utils.utils import make_bz_matrix, safe_mknode_recursive
@@ -190,6 +189,7 @@ class CustomGPRegression:
         kernel=None,
         sigma_n=1e-8,
         n_restarts=1,
+        seed=42,
     ):
         """
         :param x_features: list of indices for the quadrotor state-derived features
@@ -243,6 +243,7 @@ class CustomGPRegression:
         self.sym_jacobian_dz = None
 
         self.n_restarts = n_restarts
+        self._seed = seed
 
     @property
     def kernel(self):
@@ -385,7 +386,7 @@ class CustomGPRegression:
         ]
 
         if self.n_restarts > 1:
-            random_state = mtrand._rand
+            random_state = np.random.default_rng(seed=self._seed)
             for iteration in range(self.n_restarts - 1):
                 theta_initial = random_state.uniform(log_bounds[:, 0], log_bounds[:, 1])
                 optima.append(
