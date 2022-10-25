@@ -13,16 +13,28 @@ this program. If not, see <http://www.gnu.org/licenses/>.
 
 
 import numpy as np
-from src.quad_mpc.quad_3d_optimizer import Quad3DOptimizer
 from src.model_fitting.gp_common import restore_gp_regressors
+from src.quad_mpc.quad_3d_optimizer import Quad3DOptimizer
 from src.utils.quad_3d_opt_utils import simulate_plant, uncertainty_forward_propagation
 from src.utils.utils import make_bx_matrix
 
 
 class Quad3DMPC:
-    def __init__(self, my_quad, t_horizon=1.0, n_nodes=5, q_cost=None, r_cost=None,
-                 optimization_dt=5e-2, simulation_dt=5e-4, pre_trained_models=None, model_name="my_quad", q_mask=None,
-                 solver_options=None, rdrv_d_mat=None):
+    def __init__(
+        self,
+        my_quad,
+        t_horizon=1.0,
+        n_nodes=5,
+        q_cost=None,
+        r_cost=None,
+        optimization_dt=5e-2,
+        simulation_dt=5e-4,
+        pre_trained_models=None,
+        model_name="my_quad",
+        q_mask=None,
+        solver_options=None,
+        rdrv_d_mat=None,
+    ):
         """
         :param my_quad: Quadrotor3D simulator object
         :type my_quad: Quadrotor3D
@@ -53,7 +65,7 @@ class Quad3DMPC:
         self.optimization_dt = optimization_dt
 
         # motor commands from last step
-        self.motor_u = np.array([0., 0., 0., 0.])
+        self.motor_u = np.array([0.0, 0.0, 0.0, 0.0])
 
         self.n_nodes = n_nodes
         self.t_horizon = t_horizon
@@ -71,11 +83,19 @@ class Quad3DMPC:
             self.B_x = {}  # Selection matrix of the GP regressor-modified system states
 
         # For MPC optimization use
-        self.quad_opt = Quad3DOptimizer(my_quad, t_horizon=t_horizon, n_nodes=n_nodes,
-                                        q_cost=q_cost, r_cost=r_cost,
-                                        B_x=self.B_x, gp_regressors=self.gp_ensemble,
-                                        model_name=model_name, q_mask=q_mask,
-                                        solver_options=solver_options, rdrv_d_mat=rdrv_d_mat)
+        self.quad_opt = Quad3DOptimizer(
+            my_quad,
+            t_horizon=t_horizon,
+            n_nodes=n_nodes,
+            q_cost=q_cost,
+            r_cost=r_cost,
+            B_x=self.B_x,
+            gp_regressors=self.gp_ensemble,
+            model_name=model_name,
+            q_mask=q_mask,
+            solver_options=solver_options,
+            rdrv_d_mat=rdrv_d_mat,
+        )
 
     def clear(self):
         self.quad_opt.clear_acados_model()
@@ -120,8 +140,12 @@ class Quad3DMPC:
         quad_gp_state = self.quad.get_gp_state(quaternion=True, stacked=True)
 
         # Remove rate state for simplified model NLP
-        out_out = self.quad_opt.run_optimization(quad_current_state, use_model=use_model, return_x=return_x,
-                                                 gp_regression_state=quad_gp_state)
+        out_out = self.quad_opt.run_optimization(
+            quad_current_state,
+            use_model=use_model,
+            return_x=return_x,
+            gp_regression_state=quad_gp_state,
+        )
         return out_out
 
     def simulate(self, ref_u):
@@ -151,10 +175,19 @@ class Quad3DMPC:
         if t_horizon is None and dt_vec is None:
             t_horizon = self.t_horizon
 
-        return simulate_plant(self.quad, w_opt, simulation_dt=self.simulation_dt, simulate_func=self.simulate,
-                              t_horizon=t_horizon, dt_vec=dt_vec, progress_bar=progress_bar)
+        return simulate_plant(
+            self.quad,
+            w_opt,
+            simulation_dt=self.simulation_dt,
+            simulate_func=self.simulate,
+            t_horizon=t_horizon,
+            dt_vec=dt_vec,
+            progress_bar=progress_bar,
+        )
 
-    def forward_prop(self, x_0, w_opt, cov_0=None, t_horizon=None, dt=None, use_gp=False, use_model=0):
+    def forward_prop(
+        self, x_0, w_opt, cov_0=None, t_horizon=None, dt=None, use_gp=False, use_model=0
+    ):
         """
         Computes the forward propagation of the state using an MPC-optimized control input sequence.
         :param x_0: Initial n-length state vector
@@ -183,16 +216,25 @@ class Quad3DMPC:
         elif len(cov_0.shape) == 1:
             cov_0 = np.diag(cov_0)
         elif len(cov_0.shape) > 2:
-            TypeError("The initial covariance value must be either a 1D vector of a 2D matrix")
+            TypeError(
+                "The initial covariance value must be either a 1D vector of a 2D matrix"
+            )
 
         gp_ensemble = self.gp_ensemble if use_gp else None
 
         # Compute forward propagation of state pdf
-        return uncertainty_forward_propagation(x_0, w_opt, t_horizon=t_horizon, covar=cov_0, dt=dt,
-                                               discrete_dynamics_f=self.quad_opt.discretize_f_and_q,
-                                               dynamics_jac_f=self.quad_opt.quad_xdot_jac,
-                                               B_x=self.B_x, gp_regressors=gp_ensemble,
-                                               use_model=use_model)
+        return uncertainty_forward_propagation(
+            x_0,
+            w_opt,
+            t_horizon=t_horizon,
+            covar=cov_0,
+            dt=dt,
+            discrete_dynamics_f=self.quad_opt.discretize_f_and_q,
+            dynamics_jac_f=self.quad_opt.quad_xdot_jac,
+            B_x=self.B_x,
+            gp_regressors=gp_ensemble,
+            use_model=use_model,
+        )
 
     @staticmethod
     def reshape_input_sequence(u_seq):
@@ -205,7 +247,9 @@ class Quad3DMPC:
 
         k = np.arange(u_seq.shape[0] / 4, dtype=int)
         u_seq = np.atleast_2d(u_seq).T if len(u_seq.shape) == 1 else u_seq
-        u_seq = np.concatenate((u_seq[4 * k], u_seq[4 * k + 1], u_seq[4 * k + 2], u_seq[4 * k + 3]), 1)
+        u_seq = np.concatenate(
+            (u_seq[4 * k], u_seq[4 * k + 1], u_seq[4 * k + 2], u_seq[4 * k + 3]), 1
+        )
         return u_seq
 
     def reset(self):

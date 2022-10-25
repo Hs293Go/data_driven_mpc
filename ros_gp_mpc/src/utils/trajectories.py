@@ -12,19 +12,27 @@ this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
 
+import json
+import os
+
+import matplotlib.pyplot as plt
 import numpy as np
-from src.utils.utils import undo_quaternion_flip, rotation_matrix_to_quat
-from src.utils.utils import quaternion_inverse, q_dot_q
-from src.utils.trajectory_generator import draw_poly, get_full_traj, fit_multi_segment_polynomial_trajectory
-from src.utils.keyframe_3d_gen import random_periodical_trajectory
+import rospy
+import yaml
 from config.configuration_parameters import DirectoryConfig
 from src.quad_mpc.quad_3d import Quadrotor3D
-import matplotlib.pyplot as plt
-import os
-import yaml
-import json
-
-import rospy
+from src.utils.keyframe_3d_gen import random_periodical_trajectory
+from src.utils.trajectory_generator import (
+    draw_poly,
+    fit_multi_segment_polynomial_trajectory,
+    get_full_traj,
+)
+from src.utils.utils import (
+    q_dot_q,
+    quaternion_inverse,
+    rotation_matrix_to_quat,
+    undo_quaternion_flip,
+)
 
 
 def check_trajectory(trajectory, inputs, tvec, plot=False):
@@ -76,7 +84,14 @@ def check_trajectory(trajectory, inputs, tvec, plot=False):
         # the two attitudes can only differ in yaw --> check x,y component
         q_diff = q_dot_q(quaternion_inverse(analytic_attitude), numeric_attitude)
         errors[i, 1] = np.linalg.norm(q_diff[1:3])
-        if not np.allclose(q_diff[1:3], np.zeros(2, ), atol=1e-3, rtol=1e-3):
+        if not np.allclose(
+            q_diff[1:3],
+            np.zeros(
+                2,
+            ),
+            atol=1e-3,
+            rtol=1e-3,
+        ):
             print("Attitude and acceleration do not match!")
             print(analytic_attitude)
             print(numeric_attitude)
@@ -84,7 +99,12 @@ def check_trajectory(trajectory, inputs, tvec, plot=False):
             return False
 
         # 3) check if bodyrates agree with attitude difference
-        numeric_bodyrates = 2.0 * q_dot_q(quaternion_inverse(trajectory[i, 3:7]), numeric_derivative[i, 3:7])[1:]
+        numeric_bodyrates = (
+            2.0
+            * q_dot_q(
+                quaternion_inverse(trajectory[i, 3:7]), numeric_derivative[i, 3:7]
+            )[1:]
+        )
         num_bodyrates.append(numeric_bodyrates)
         analytic_bodyrates = trajectory[i, 10:13]
         errors[i, 2] = np.linalg.norm(numeric_bodyrates - analytic_bodyrates)
@@ -104,28 +124,30 @@ def check_trajectory(trajectory, inputs, tvec, plot=False):
         plt.figure()
         for i in range(3):
             plt.subplot(3, 2, i * 2 + 1)
-            plt.plot(numeric_derivative[:, i], label='numeric')
-            plt.plot(trajectory[:, 7 + i], label='analytic')
-            plt.ylabel('m/s')
+            plt.plot(numeric_derivative[:, i], label="numeric")
+            plt.plot(trajectory[:, 7 + i], label="analytic")
+            plt.ylabel("m/s")
             if i == 0:
                 plt.title("Velocity check")
             plt.legend()
 
         for i in range(3):
             plt.subplot(3, 2, i * 2 + 2)
-            plt.plot(num_bodyrates[:, i], label='numeric')
-            plt.plot(trajectory[:, 10 + i], label='analytic')
-            plt.ylabel('rad/s')
+            plt.plot(num_bodyrates[:, i], label="numeric")
+            plt.plot(trajectory[:, 10 + i], label="analytic")
+            plt.ylabel("rad/s")
             if i == 0:
                 plt.title("Body rate check")
             plt.legend()
-        plt.suptitle('Integrity check of reference trajectory')
+        plt.suptitle("Integrity check of reference trajectory")
         plt.show()
 
     return True
 
 
-def minimum_snap_trajectory_generator(traj_derivatives, yaw_derivatives, t_ref, quad, map_limits, plot):
+def minimum_snap_trajectory_generator(
+    traj_derivatives, yaw_derivatives, t_ref, quad, map_limits, plot
+):
     """
     Follows the Minimum Snap Trajectory paper to generate a full trajectory given the position reference and its
     derivatives, and the yaw trajectory and its derivatives.
@@ -152,9 +174,12 @@ def minimum_snap_trajectory_generator(traj_derivatives, yaw_derivatives, t_ref, 
 
     # Add gravity to accelerations
     gravity = 9.81
-    thrust = traj_derivatives[2, :, :].T + np.tile(np.array([[0, 0, 1]]), (len_traj, 1)) * gravity
+    thrust = (
+        traj_derivatives[2, :, :].T
+        + np.tile(np.array([[0, 0, 1]]), (len_traj, 1)) * gravity
+    )
     # Compute body axes
-    z_b = thrust / np.sqrt(np.sum(thrust ** 2, 1))[:, np.newaxis]
+    z_b = thrust / np.sqrt(np.sum(thrust**2, 1))[:, np.newaxis]
 
     yawing = np.any(yaw_derivatives[0, :] != 0)
 
@@ -165,15 +190,22 @@ def minimum_snap_trajectory_generator(traj_derivatives, yaw_derivatives, t_ref, 
 
     if yawing:
         # yaw is defined as the projection of the body-x axis on the horizontal plane
-        x_c = np.concatenate((np.cos(yaw_derivatives[0, :])[:, np.newaxis],
-                              np.sin(yaw_derivatives[0, :])[:, np.newaxis],
-                              np.zeros(len_traj)[:, np.newaxis]), 1)
+        x_c = np.concatenate(
+            (
+                np.cos(yaw_derivatives[0, :])[:, np.newaxis],
+                np.sin(yaw_derivatives[0, :])[:, np.newaxis],
+                np.zeros(len_traj)[:, np.newaxis],
+            ),
+            1,
+        )
         y_b = np.cross(z_b, x_c)
-        y_b = y_b / np.sqrt(np.sum(y_b ** 2, axis=1))[:, np.newaxis]
+        y_b = y_b / np.sqrt(np.sum(y_b**2, axis=1))[:, np.newaxis]
         x_b = np.cross(y_b, z_b)
 
         # Rotation matrix (from body to world)
-        b_r_w = np.concatenate((x_b[:, :, np.newaxis], y_b[:, :, np.newaxis], z_b[:, :, np.newaxis]), -1)
+        b_r_w = np.concatenate(
+            (x_b[:, :, np.newaxis], y_b[:, :, np.newaxis], z_b[:, :, np.newaxis]), -1
+        )
         q = []
         for i in range(len_traj):
             # Transform to quaternion
@@ -202,7 +234,7 @@ def minimum_snap_trajectory_generator(traj_derivatives, yaw_derivatives, t_ref, 
         q_w = 1.0 + np.sum(e_z * z_b, axis=1)
         q_xyz = np.cross(e_z, z_b)
         q = 0.5 * np.concatenate([np.expand_dims(q_w, axis=1), q_xyz], axis=1)
-        q = q / np.sqrt(np.sum(q ** 2, 1))[:, np.newaxis]
+        q = q / np.sqrt(np.sum(q**2, 1))[:, np.newaxis]
 
         # Use numerical differentiation of quaternions
         q_dot = np.gradient(q, axis=0) / discretization_dt
@@ -221,13 +253,17 @@ def minimum_snap_trajectory_generator(traj_derivatives, yaw_derivatives, t_ref, 
             for i in range(1, len_traj):
                 yaw_corr = -rate[i, 2] * discretization_dt
                 yaw_corr_acc += yaw_corr
-                q_corr = np.array([np.cos(yaw_corr_acc / 2.0), 0.0, 0.0, np.sin(yaw_corr_acc / 2.0)])
+                q_corr = np.array(
+                    [np.cos(yaw_corr_acc / 2.0), 0.0, 0.0, np.sin(yaw_corr_acc / 2.0)]
+                )
                 q_new[i, :] = q_dot_q(q[i, :], q_corr)
                 w_int[i, :] = 2.0 * q_dot_q(quaternion_inverse(q[i, :]), q_dot[i])[1:]
 
             q_new_dot = np.gradient(q_new, axis=0) / discretization_dt
             for i in range(1, len_traj):
-                w_int[i, :] = 2.0 * q_dot_q(quaternion_inverse(q_new[i, :]), q_new_dot[i])[1:]
+                w_int[i, :] = (
+                    2.0 * q_dot_q(quaternion_inverse(q_new[i, :]), q_new_dot[i])[1:]
+                )
 
             q = q_new
             rate[:, 0] = w_int[:, 0]
@@ -238,14 +274,25 @@ def minimum_snap_trajectory_generator(traj_derivatives, yaw_derivatives, t_ref, 
     # Compute inputs
     rate_dot = np.gradient(rate, axis=0) / discretization_dt
 
-    rate_x_Jrate = np.array([(quad.J[2] - quad.J[1]) * rate[:, 2] * rate[:, 1],
-                             (quad.J[0] - quad.J[2]) * rate[:, 0] * rate[:, 2],
-                             (quad.J[1] - quad.J[0]) * rate[:, 1] * rate[:, 0]]).T
+    rate_x_Jrate = np.array(
+        [
+            (quad.J[2] - quad.J[1]) * rate[:, 2] * rate[:, 1],
+            (quad.J[0] - quad.J[2]) * rate[:, 0] * rate[:, 2],
+            (quad.J[1] - quad.J[0]) * rate[:, 1] * rate[:, 0],
+        ]
+    ).T
 
     tau = rate_dot * quad.J[np.newaxis, :] + rate_x_Jrate
     b = np.concatenate((tau, f_t), axis=-1)
-    a_mat = np.concatenate((quad.y_f[np.newaxis, :], -quad.x_f[np.newaxis, :],
-                            quad.z_l_tau[np.newaxis, :], np.ones_like(quad.z_l_tau)[np.newaxis, :]), 0)
+    a_mat = np.concatenate(
+        (
+            quad.y_f[np.newaxis, :],
+            -quad.x_f[np.newaxis, :],
+            quad.z_l_tau[np.newaxis, :],
+            np.ones_like(quad.z_l_tau)[np.newaxis, :],
+        ),
+        0,
+    )
 
     reference_u = np.zeros((len_traj, 4))
     for i in range(len_traj):
@@ -285,17 +332,21 @@ def minimum_snap_trajectory_generator(traj_derivatives, yaw_derivatives, t_ref, 
 def load_map_limits_from_file(map_limits):
     if map_limits is not None and map_limits != "None":
         config_path = DirectoryConfig.CONFIG_DIR
-        params_file = os.path.join(config_path, map_limits + '.yaml')
+        params_file = os.path.join(config_path, map_limits + ".yaml")
         try:
             with open(params_file) as file:
                 limits = yaml.full_load(file)
-                map_limits = {"x": [limits["x_min"], limits["x_max"]],
-                              "y": [limits["y_min"], limits["y_max"]],
-                              "z": [limits["z_min"], limits["z_max"]]}
+                map_limits = {
+                    "x": [limits["x_min"], limits["x_max"]],
+                    "y": [limits["y_min"], limits["y_max"]],
+                    "z": [limits["z_min"], limits["z_max"]],
+                }
                 rospy.loginfo("Using world limits: " + json.dumps(limits))
         except FileNotFoundError:
-            warn_msg = "Tried to load environment limits: '%s', but the file was not found. Using default limits." \
-                       % map_limits
+            warn_msg = (
+                "Tried to load environment limits: '%s', but the file was not found. Using default limits."
+                % map_limits
+            )
             rospy.logwarn(warn_msg)
             map_limits = None
     else:
@@ -314,10 +365,16 @@ def straight_trajectory(quad, discretization_dt, speed):
     av_dist = np.mean(np.sqrt(np.sum(np.diff(pos_traj, axis=0) ** 2, axis=1)))
     av_dt = av_dist / speed
 
-    poly_pos_traj = fit_multi_segment_polynomial_trajectory(pos_traj.T, att_traj[:, -1].T)
-    traj, yaw, t_ref = get_full_traj(poly_pos_traj, target_dt=av_dt, int_dt=discretization_dt)
+    poly_pos_traj = fit_multi_segment_polynomial_trajectory(
+        pos_traj.T, att_traj[:, -1].T
+    )
+    traj, yaw, t_ref = get_full_traj(
+        poly_pos_traj, target_dt=av_dt, int_dt=discretization_dt
+    )
 
-    reference_traj, t_ref, reference_u = minimum_snap_trajectory_generator(traj, yaw, t_ref, quad, None, False)
+    reference_traj, t_ref, reference_u = minimum_snap_trajectory_generator(
+        traj, yaw, t_ref, quad, None, False
+    )
     return reference_traj, t_ref, reference_u
 
 
@@ -325,7 +382,9 @@ def random_trajectory(quad, discretization_dt, seed, speed, map_name=None, plot=
     map_limits = load_map_limits_from_file(map_name)
 
     # Get a random smooth position trajectory
-    pos_traj, att_traj = random_periodical_trajectory(random_state=seed, map_limits=map_limits, plot=False)
+    pos_traj, att_traj = random_periodical_trajectory(
+        random_state=seed, map_limits=map_limits, plot=False
+    )
 
     if map_limits is None:
         # Locate starting point right at x=0 and y=0.
@@ -343,18 +402,33 @@ def random_trajectory(quad, discretization_dt, seed, speed, map_name=None, plot=
 
     # Calculate the polynomial fit to the position trajectory, and compute the full kinematic reference. This
     # trajectory is sampled according to the frequency that will be needed for the MPC.
-    poly_pos_traj = fit_multi_segment_polynomial_trajectory(pos_traj.T, att_traj[:, -1].T)
+    poly_pos_traj = fit_multi_segment_polynomial_trajectory(
+        pos_traj.T, att_traj[:, -1].T
+    )
 
     traj, yaw, t_ref = get_full_traj(poly_pos_traj, av_dt, discretization_dt)
 
-    reference_traj, t_ref, reference_u = minimum_snap_trajectory_generator(traj, yaw, t_ref, quad, map_limits, False)
+    reference_traj, t_ref, reference_u = minimum_snap_trajectory_generator(
+        traj, yaw, t_ref, quad, map_limits, False
+    )
     if plot:
         draw_poly(reference_traj, reference_u, t_ref, pos_traj.T)
 
     return reference_traj, t_ref, reference_u
 
 
-def loop_trajectory(quad, discretization_dt, radius, z, lin_acc, clockwise, yawing, v_max, map_name, plot):
+def loop_trajectory(
+    quad,
+    discretization_dt,
+    radius,
+    z,
+    lin_acc,
+    clockwise,
+    yawing,
+    v_max,
+    map_name,
+    plot,
+):
     """
     Creates a circular trajectory on the x-y plane that increases speed by 1m/s at every revolution.
 
@@ -404,23 +478,60 @@ def loop_trajectory(quad, discretization_dt, radius, z, lin_acc, clockwise, yawi
     transition_alpha = alpha_acc * np.cos(np.pi / (2 * ramp_up_t) * transition_t_vec)
     transition_t_vec += coasting_t_vec[-1] + discretization_dt
     # Deceleration phase
-    down_coasting_t_vec = transition_t_vec[-1] + np.arange(0, coasting_duration, discretization_dt) + discretization_dt
+    down_coasting_t_vec = (
+        transition_t_vec[-1]
+        + np.arange(0, coasting_duration, discretization_dt)
+        + discretization_dt
+    )
     down_coasting_alpha = -np.ones_like(down_coasting_t_vec) * alpha_acc
     # Bring to rest phase
-    ramp_up_t_vec = down_coasting_t_vec[-1] + np.arange(0, ramp_up_t, discretization_dt) + discretization_dt
+    ramp_up_t_vec = (
+        down_coasting_t_vec[-1]
+        + np.arange(0, ramp_up_t, discretization_dt)
+        + discretization_dt
+    )
     ramp_up_alpha_end = ramp_up_alpha - alpha_acc
 
     # Concatenate all sequences
-    t_ref = np.concatenate((ramp_t_vec, coasting_t_vec, transition_t_vec, down_coasting_t_vec, ramp_up_t_vec))
-    alpha_vec = np.concatenate((
-        ramp_up_alpha, coasting_alpha, transition_alpha, down_coasting_alpha, ramp_up_alpha_end))
+    t_ref = np.concatenate(
+        (
+            ramp_t_vec,
+            coasting_t_vec,
+            transition_t_vec,
+            down_coasting_t_vec,
+            ramp_up_t_vec,
+        )
+    )
+    alpha_vec = np.concatenate(
+        (
+            ramp_up_alpha,
+            coasting_alpha,
+            transition_alpha,
+            down_coasting_alpha,
+            ramp_up_alpha_end,
+        )
+    )
 
     # Calculate derivative of angular acceleration (alpha_vec)
-    ramp_up_alpha_dt = alpha_acc * np.pi / (2 * ramp_up_t) * np.sin(np.pi / ramp_up_t * ramp_t_vec)
+    ramp_up_alpha_dt = (
+        alpha_acc * np.pi / (2 * ramp_up_t) * np.sin(np.pi / ramp_up_t * ramp_t_vec)
+    )
     coasting_alpha_dt = np.zeros_like(coasting_alpha)
-    transition_alpha_dt = - alpha_acc * np.pi / (2 * ramp_up_t) * np.sin(np.pi / (2 * ramp_up_t) * transition_t_vec)
-    alpha_dt = np.concatenate((
-        ramp_up_alpha_dt, coasting_alpha_dt, transition_alpha_dt, coasting_alpha_dt, ramp_up_alpha_dt))
+    transition_alpha_dt = (
+        -alpha_acc
+        * np.pi
+        / (2 * ramp_up_t)
+        * np.sin(np.pi / (2 * ramp_up_t) * transition_t_vec)
+    )
+    alpha_dt = np.concatenate(
+        (
+            ramp_up_alpha_dt,
+            coasting_alpha_dt,
+            transition_alpha_dt,
+            coasting_alpha_dt,
+            ramp_up_alpha_dt,
+        )
+    )
 
     if not clockwise:
         alpha_vec *= -1
@@ -436,15 +547,33 @@ def loop_trajectory(quad, discretization_dt, radius, z, lin_acc, clockwise, yawi
     pos_traj_z = np.ones_like(pos_traj_x) * z
 
     vel_traj_x = (radius * w_vec * np.cos(angle_vec))[np.newaxis, np.newaxis, :]
-    vel_traj_y = - (radius * w_vec * np.sin(angle_vec))[np.newaxis, np.newaxis, :]
+    vel_traj_y = -(radius * w_vec * np.sin(angle_vec))[np.newaxis, np.newaxis, :]
 
-    acc_traj_x = radius * (alpha_vec * np.cos(angle_vec) - w_vec ** 2 * np.sin(angle_vec))[np.newaxis, np.newaxis, :]
-    acc_traj_y = - radius * (alpha_vec * np.sin(angle_vec) + w_vec ** 2 * np.cos(angle_vec))[np.newaxis, np.newaxis, :]
+    acc_traj_x = (
+        radius
+        * (alpha_vec * np.cos(angle_vec) - w_vec**2 * np.sin(angle_vec))[
+            np.newaxis, np.newaxis, :
+        ]
+    )
+    acc_traj_y = (
+        -radius
+        * (alpha_vec * np.sin(angle_vec) + w_vec**2 * np.cos(angle_vec))[
+            np.newaxis, np.newaxis, :
+        ]
+    )
 
-    jerk_traj_x = radius * (alpha_dt * np.cos(angle_vec) - alpha_vec * np.sin(angle_vec) * w_vec -
-                            np.cos(angle_vec) * w_vec ** 3 - 2 * np.sin(angle_vec) * w_vec * alpha_vec)
-    jerk_traj_y = - radius * (np.cos(angle_vec) * w_vec * alpha_vec + np.sin(angle_vec) * alpha_dt -
-                              np.sin(angle_vec) * w_vec ** 3 + 2 * np.cos(angle_vec) * w_vec * alpha_vec)
+    jerk_traj_x = radius * (
+        alpha_dt * np.cos(angle_vec)
+        - alpha_vec * np.sin(angle_vec) * w_vec
+        - np.cos(angle_vec) * w_vec**3
+        - 2 * np.sin(angle_vec) * w_vec * alpha_vec
+    )
+    jerk_traj_y = -radius * (
+        np.cos(angle_vec) * w_vec * alpha_vec
+        + np.sin(angle_vec) * alpha_dt
+        - np.sin(angle_vec) * w_vec**3
+        + 2 * np.cos(angle_vec) * w_vec * alpha_vec
+    )
     jerk_traj_x = jerk_traj_x[np.newaxis, np.newaxis, :]
     jerk_traj_y = jerk_traj_y[np.newaxis, np.newaxis, :]
 
@@ -453,18 +582,33 @@ def loop_trajectory(quad, discretization_dt, radius, z, lin_acc, clockwise, yawi
     else:
         yaw_traj = np.zeros_like(angle_vec)
 
-    traj = np.concatenate((
-        np.concatenate((pos_traj_x, pos_traj_y, pos_traj_z), 1),
-        np.concatenate((vel_traj_x, vel_traj_y, np.zeros_like(vel_traj_x)), 1),
-        np.concatenate((acc_traj_x, acc_traj_y, np.zeros_like(acc_traj_x)), 1),
-        np.concatenate((jerk_traj_x, jerk_traj_y, np.zeros_like(jerk_traj_x)), 1)), 0)
+    traj = np.concatenate(
+        (
+            np.concatenate((pos_traj_x, pos_traj_y, pos_traj_z), 1),
+            np.concatenate((vel_traj_x, vel_traj_y, np.zeros_like(vel_traj_x)), 1),
+            np.concatenate((acc_traj_x, acc_traj_y, np.zeros_like(acc_traj_x)), 1),
+            np.concatenate((jerk_traj_x, jerk_traj_y, np.zeros_like(jerk_traj_x)), 1),
+        ),
+        0,
+    )
 
     yaw = np.concatenate((yaw_traj[np.newaxis, :], w_vec[np.newaxis, :]), 0)
 
     return minimum_snap_trajectory_generator(traj, yaw, t_ref, quad, map_limits, plot)
 
 
-def lemniscate_trajectory(quad, discretization_dt, radius, z, lin_acc, clockwise, yawing, v_max, map_name, plot):
+def lemniscate_trajectory(
+    quad,
+    discretization_dt,
+    radius,
+    z,
+    lin_acc,
+    clockwise,
+    yawing,
+    v_max,
+    map_name,
+    plot,
+):
     """
 
     :param quad:
@@ -513,16 +657,39 @@ def lemniscate_trajectory(quad, discretization_dt, radius, z, lin_acc, clockwise
     transition_alpha = alpha_acc * np.cos(np.pi / (2 * ramp_up_t) * transition_t_vec)
     transition_t_vec += coasting_t_vec[-1] + discretization_dt
     # Deceleration phase
-    down_coasting_t_vec = transition_t_vec[-1] + np.arange(0, coasting_duration, discretization_dt) + discretization_dt
+    down_coasting_t_vec = (
+        transition_t_vec[-1]
+        + np.arange(0, coasting_duration, discretization_dt)
+        + discretization_dt
+    )
     down_coasting_alpha = -np.ones_like(down_coasting_t_vec) * alpha_acc
     # Bring to rest phase
-    ramp_up_t_vec = down_coasting_t_vec[-1] + np.arange(0, ramp_up_t, discretization_dt) + discretization_dt
+    ramp_up_t_vec = (
+        down_coasting_t_vec[-1]
+        + np.arange(0, ramp_up_t, discretization_dt)
+        + discretization_dt
+    )
     ramp_up_alpha_end = ramp_up_alpha - alpha_acc
 
     # Concatenate all sequences
-    t_ref = np.concatenate((ramp_t_vec, coasting_t_vec, transition_t_vec, down_coasting_t_vec, ramp_up_t_vec))
-    alpha_vec = np.concatenate((
-        ramp_up_alpha, coasting_alpha, transition_alpha, down_coasting_alpha, ramp_up_alpha_end))
+    t_ref = np.concatenate(
+        (
+            ramp_t_vec,
+            coasting_t_vec,
+            transition_t_vec,
+            down_coasting_t_vec,
+            ramp_up_t_vec,
+        )
+    )
+    alpha_vec = np.concatenate(
+        (
+            ramp_up_alpha,
+            coasting_alpha,
+            transition_alpha,
+            down_coasting_alpha,
+            ramp_up_alpha_end,
+        )
+    )
 
     # Compute angular integrals
     w_vec = np.cumsum(alpha_vec) * discretization_dt
@@ -536,25 +703,48 @@ def lemniscate_trajectory(quad, discretization_dt, radius, z, lin_acc, clockwise
 
     # Compute position, velocity, acceleration, jerk
     pos_traj_x = radius * np.cos(angle_vec)[np.newaxis, np.newaxis, :]
-    pos_traj_y = radius * (np.sin(angle_vec) * np.cos(angle_vec))[np.newaxis, np.newaxis, :]
-    pos_traj_z = - z_dim * np.cos(4.0 * angle_vec)[np.newaxis, np.newaxis, :] + z
+    pos_traj_y = (
+        radius * (np.sin(angle_vec) * np.cos(angle_vec))[np.newaxis, np.newaxis, :]
+    )
+    pos_traj_z = -z_dim * np.cos(4.0 * angle_vec)[np.newaxis, np.newaxis, :] + z
 
     vel_traj_x = -radius * (w_vec * np.sin(angle_vec))[np.newaxis, np.newaxis, :]
-    vel_traj_y = radius * (w_vec * np.cos(angle_vec) ** 2 - w_vec * np.sin(angle_vec) ** 2)[np.newaxis, np.newaxis, :]
-    vel_traj_z = 4.0 * z_dim * w_vec * np.sin(4.0 * angle_vec)[np.newaxis, np.newaxis, :]
+    vel_traj_y = (
+        radius
+        * (w_vec * np.cos(angle_vec) ** 2 - w_vec * np.sin(angle_vec) ** 2)[
+            np.newaxis, np.newaxis, :
+        ]
+    )
+    vel_traj_z = (
+        4.0 * z_dim * w_vec * np.sin(4.0 * angle_vec)[np.newaxis, np.newaxis, :]
+    )
 
-    acc_traj_x = -radius * (alpha_vec * np.sin(angle_vec) + w_vec ** 2 * np.cos(angle_vec))
-    acc_traj_y = radius * (alpha_vec * np.cos(angle_vec) ** 2 - 2.0 * w_vec ** 2 * np.cos(angle_vec) * np.sin(
-        angle_vec) - alpha_vec * np.sin(angle_vec) ** 2 - 2.0 * w_vec ** 2 * np.sin(angle_vec) * np.cos(angle_vec))
-    acc_traj_z = 16.0 * z_dim * (w_vec ** 2 * np.cos(4.0 * angle_vec) + alpha_vec * np.sin(4.0 * angle_vec))
+    acc_traj_x = -radius * (
+        alpha_vec * np.sin(angle_vec) + w_vec**2 * np.cos(angle_vec)
+    )
+    acc_traj_y = radius * (
+        alpha_vec * np.cos(angle_vec) ** 2
+        - 2.0 * w_vec**2 * np.cos(angle_vec) * np.sin(angle_vec)
+        - alpha_vec * np.sin(angle_vec) ** 2
+        - 2.0 * w_vec**2 * np.sin(angle_vec) * np.cos(angle_vec)
+    )
+    acc_traj_z = (
+        16.0
+        * z_dim
+        * (w_vec**2 * np.cos(4.0 * angle_vec) + alpha_vec * np.sin(4.0 * angle_vec))
+    )
     acc_traj_x = acc_traj_x[np.newaxis, np.newaxis, :]
     acc_traj_y = acc_traj_y[np.newaxis, np.newaxis, :]
     acc_traj_z = acc_traj_z[np.newaxis, np.newaxis, :]
 
-    traj = np.concatenate((
-        np.concatenate((pos_traj_x, pos_traj_y, pos_traj_z), 1),
-        np.concatenate((vel_traj_x, vel_traj_y, vel_traj_z), 1),
-        np.concatenate((acc_traj_x, acc_traj_y, acc_traj_z), 1)), 0)
+    traj = np.concatenate(
+        (
+            np.concatenate((pos_traj_x, pos_traj_y, pos_traj_z), 1),
+            np.concatenate((vel_traj_x, vel_traj_y, vel_traj_z), 1),
+            np.concatenate((acc_traj_x, acc_traj_y, acc_traj_z), 1),
+        ),
+        0,
+    )
 
     yaw = np.zeros_like(traj)
 

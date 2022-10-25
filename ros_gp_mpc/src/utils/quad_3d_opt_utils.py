@@ -17,7 +17,9 @@ from src.quad_mpc.quad_3d import Quadrotor3D
 from tqdm import tqdm
 
 
-def discretize_dynamics_and_cost(t_horizon, n_points, m_steps_per_point, x, u, dynamics_f, cost_f, ind):
+def discretize_dynamics_and_cost(
+    t_horizon, n_points, m_steps_per_point, x, u, dynamics_f, cost_f, ind
+):
     """
     Integrates the symbolic dynamics and cost equations until the time horizon using a RK4 method.
     :param t_horizon: time horizon in seconds
@@ -34,7 +36,7 @@ def discretize_dynamics_and_cost(t_horizon, n_points, m_steps_per_point, x, u, d
 
     if isinstance(cost_f, list):
         # Select the list of cost functions
-        cost_f = cost_f[ind * m_steps_per_point:(ind + 1) * m_steps_per_point]
+        cost_f = cost_f[ind * m_steps_per_point : (ind + 1) * m_steps_per_point]
     else:
         cost_f = [cost_f]
 
@@ -44,22 +46,33 @@ def discretize_dynamics_and_cost(t_horizon, n_points, m_steps_per_point, x, u, d
     q = 0
 
     for j in range(m_steps_per_point):
-        k1 = dynamics_f(x=x, u=u)['x_dot']
-        k2 = dynamics_f(x=x + dt / 2 * k1, u=u)['x_dot']
-        k3 = dynamics_f(x=x + dt / 2 * k2, u=u)['x_dot']
-        k4 = dynamics_f(x=x + dt * k3, u=u)['x_dot']
+        k1 = dynamics_f(x=x, u=u)["x_dot"]
+        k2 = dynamics_f(x=x + dt / 2 * k1, u=u)["x_dot"]
+        k3 = dynamics_f(x=x + dt / 2 * k2, u=u)["x_dot"]
+        k4 = dynamics_f(x=x + dt * k3, u=u)["x_dot"]
         x_out = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
 
         x = x_out
 
         if cost_f and cost_f[j] is not None:
-            q = q + cost_f[j](x=x, u=u)['q']
+            q = q + cost_f[j](x=x, u=u)["q"]
 
-    return cs.Function('F', [x0, u], [x, q], ['x0', 'p'], ['xf', 'qf'])
+    return cs.Function("F", [x0, u], [x, q], ["x0", "p"], ["xf", "qf"])
 
 
-def _forward_prop_core(x_0, u_seq, t_horizon, discrete_dynamics_f, dynamics_jac_f, B_x, gp_ensemble, covar, dt,
-                       m_int_steps, use_model):
+def _forward_prop_core(
+    x_0,
+    u_seq,
+    t_horizon,
+    discrete_dynamics_f,
+    dynamics_jac_f,
+    B_x,
+    gp_ensemble,
+    covar,
+    dt,
+    m_int_steps,
+    use_model,
+):
     """
     Propagates forward the state estimate described by the mean vector x_0 and the covariance matrix covar, and a
     sequence of inputs for the system u_seq. These inputs can either be numerical or symbolic.
@@ -81,7 +94,9 @@ def _forward_prop_core(x_0, u_seq, t_horizon, discrete_dynamics_f, dynamics_jac_
 
     # Reshape input sequence to a N x 4 (1D) vector. Assume control input dim = 4
     k = np.arange(int(u_seq.shape[0] / 4))
-    input_sequence = cs.horzcat(u_seq[4 * k], u_seq[4 * k + 1], u_seq[4 * k + 2], u_seq[4 * k + 3])
+    input_sequence = cs.horzcat(
+        u_seq[4 * k], u_seq[4 * k + 1], u_seq[4 * k + 2], u_seq[4 * k + 3]
+    )
 
     N = int(u_seq.shape[0] / 4)
 
@@ -105,11 +120,18 @@ def _forward_prop_core(x_0, u_seq, t_horizon, discrete_dynamics_f, dynamics_jac_
 
         # mu(k+1) vector from propagation equations. Pass state through nominal dynamics with GP mean augmentation if GP
         # is available. Otherwise use nominal dynamics only.
-        f_func = discrete_dynamics_f(dt[k], 1, m_int_steps, k, use_gp=gp_ensemble is not None, use_model=use_model)
+        f_func = discrete_dynamics_f(
+            dt[k],
+            1,
+            m_int_steps,
+            k,
+            use_gp=gp_ensemble is not None,
+            use_model=use_model,
+        )
 
         fk = f_func(x0=mu_k, p=u_k)
-        mu_next = fk['xf']
-        stage_cost = fk['qf']
+        mu_next = fk["xf"]
+        stage_cost = fk["qf"]
 
         # K(k+1) matrix from propagation equations
         K_mat = sig_k
@@ -125,13 +147,20 @@ def _forward_prop_core(x_0, u_seq, t_horizon, discrete_dynamics_f, dynamics_jac_
             z_k = cs.mtimes(B_z, cs.vertcat(mu_k, u_k.T))
 
             # GP prediction. Stack predictions vertically along prediction dimension (e.g. vx, vy, ...)
-            _, gp_covar_preds, gp_noise_prior = gp_ensemble.predict(z_k, return_cov=True, gp_idx=use_model)
+            _, gp_covar_preds, gp_noise_prior = gp_ensemble.predict(
+                z_k, return_cov=True, gp_idx=use_model
+            )
 
             # Covariance forward propagation.
             l_mat = cs.horzcat(l_mat, B_x * dt[k])  # left-multiplying matrix
-            sig_ld_comp = cs.mtimes(gp_prediction_jac(z_k, B_x, B_z, gp_ensemble, use_model), sig_k)
+            sig_ld_comp = cs.mtimes(
+                gp_prediction_jac(z_k, B_x, B_z, gp_ensemble, use_model), sig_k
+            )
             K_mat = cs.vertcat(K_mat, sig_ld_comp)
-            K_mat = cs.horzcat(K_mat, cs.vertcat(sig_ld_comp.T, cs.diag(gp_covar_preds + gp_noise_prior)))
+            K_mat = cs.horzcat(
+                K_mat,
+                cs.vertcat(sig_ld_comp.T, cs.diag(gp_covar_preds + gp_noise_prior)),
+            )
 
         # Add next state estimate to lists
         mu_x += [mu_next]
@@ -142,8 +171,19 @@ def _forward_prop_core(x_0, u_seq, t_horizon, discrete_dynamics_f, dynamics_jac_
     return mu_x, cov_x, cost_x
 
 
-def uncertainty_forward_propagation(x_0, u_seq, t_horizon, discrete_dynamics_f, dynamics_jac_f, B_x=None,
-                                    gp_regressors=None, covar=None, dt=None, m_integration_steps=1, use_model=0):
+def uncertainty_forward_propagation(
+    x_0,
+    u_seq,
+    t_horizon,
+    discrete_dynamics_f,
+    dynamics_jac_f,
+    B_x=None,
+    gp_regressors=None,
+    covar=None,
+    dt=None,
+    m_integration_steps=1,
+    use_model=0,
+):
     if covar is None:
         covar = np.zeros((len(x_0), len(x_0)))
     else:
@@ -151,14 +191,29 @@ def uncertainty_forward_propagation(x_0, u_seq, t_horizon, discrete_dynamics_f, 
 
     x_0 = np.array(x_0)
 
-    mu_x, cov_x, _ = _forward_prop_core(x_0, u_seq, t_horizon, discrete_dynamics_f, dynamics_jac_f, B_x,
-                                        gp_regressors, covar, dt, m_integration_steps, use_model)
+    mu_x, cov_x, _ = _forward_prop_core(
+        x_0,
+        u_seq,
+        t_horizon,
+        discrete_dynamics_f,
+        dynamics_jac_f,
+        B_x,
+        gp_regressors,
+        covar,
+        dt,
+        m_integration_steps,
+        use_model,
+    )
 
     mu_x = cs.horzcat(*mu_x)
     cov_x = cs.horzcat(*cov_x)
 
     mu_prop = np.array(mu_x).T
-    cov_prop = np.array(cov_x).reshape((mu_prop.shape[1], mu_prop.shape[1], -1), order='F').transpose(2, 0, 1)
+    cov_prop = (
+        np.array(cov_x)
+        .reshape((mu_prop.shape[1], mu_prop.shape[1], -1), order="F")
+        .transpose(2, 0, 1)
+    )
     return mu_prop, cov_prop
 
 
@@ -184,16 +239,16 @@ def gp_prediction_jac(z, Bx, Bz, gp_ensemble, gp_idx):
     if isinstance(Bz, dict):
         z_dims = {}
         for dim in Bz.keys():
-            z_dims[dim] = np.matmul(Bz[dim][:, :len(out_dims)], out_dims)
+            z_dims[dim] = np.matmul(Bz[dim][:, : len(out_dims)], out_dims)
     else:
-        bz = np.matmul(Bz[:, :len(out_dims)], out_dims)
+        bz = np.matmul(Bz[:, : len(out_dims)], out_dims)
         z_dims = {k: v for k, v in zip(z.keys(), [bz] * len(z.keys()))}
         Bz = {k: v for k, v in zip(z.keys(), [Bz] * len(z.keys()))}
 
     jac = []
     for dim in gp_idx.keys():
         # Mapping from z to x
-        inv_Bz = Bz[dim][:, :len(out_dims)].T
+        inv_Bz = Bz[dim][:, : len(out_dims)].T
 
         gp = gp_ensemble.gp[dim][gp_idx[dim][0]]
         jac += [cs.mtimes(inv_Bz, gp.eval_gp_jac(z[dim]) * z_dims[dim])]
@@ -201,7 +256,15 @@ def gp_prediction_jac(z, Bx, Bz, gp_ensemble, gp_idx):
     return cs.horzcat(*jac).T
 
 
-def simulate_plant(quad, w_opt, simulation_dt, simulate_func, t_horizon=None, dt_vec=None, progress_bar=False):
+def simulate_plant(
+    quad,
+    w_opt,
+    simulation_dt,
+    simulate_func,
+    t_horizon=None,
+    dt_vec=None,
+    progress_bar=False,
+):
     """
     Given a sequence of n inputs, evaluates the simulated discrete-time plant model n steps into the future. The
     current drone state will not be changed by calling this method.
@@ -241,8 +304,11 @@ def simulate_plant(quad, w_opt, simulation_dt, simulate_func, t_horizon=None, dt
         first_dt = dt_vec[0]
 
     t_start_ep = 1e-6
-    int_range = tqdm(np.arange(t_start_ep, total_sim_time, simulation_dt)) if progress_bar else \
-        np.arange(t_start_ep, total_sim_time, simulation_dt)
+    int_range = (
+        tqdm(np.arange(t_start_ep, total_sim_time, simulation_dt))
+        if progress_bar
+        else np.arange(t_start_ep, total_sim_time, simulation_dt)
+    )
 
     current_ind = 0
     past_ind = 0
@@ -250,7 +316,10 @@ def simulate_plant(quad, w_opt, simulation_dt, simulate_func, t_horizon=None, dt
         ref_u = w_opt[current_ind, :].T
         simulate_func(ref_u)
         if t_elapsed + simulation_dt >= first_dt:
-            current_ind = np.argwhere(change_control_input <= t_elapsed + simulation_dt)[-1, 0] + 1
+            current_ind = (
+                np.argwhere(change_control_input <= t_elapsed + simulation_dt)[-1, 0]
+                + 1
+            )
             if past_ind != current_ind:
                 sim_traj.append(quad.get_state(quaternion=True, stacked=True))
                 past_ind = current_ind
@@ -264,7 +333,9 @@ def simulate_plant(quad, w_opt, simulation_dt, simulate_func, t_horizon=None, dt
     return sim_traj
 
 
-def get_reference_chunk(reference_traj, reference_u, current_idx, n_mpc_nodes, reference_over_sampling):
+def get_reference_chunk(
+    reference_traj, reference_u, current_idx, n_mpc_nodes, reference_over_sampling
+):
     """
     Extracts the reference states and controls for the current MPC optimization given the over-sampled counterparts.
 
@@ -282,15 +353,25 @@ def get_reference_chunk(reference_traj, reference_u, current_idx, n_mpc_nodes, r
     """
 
     # Dense references
-    ref_traj_chunk = reference_traj[current_idx:current_idx + (n_mpc_nodes + 1) * reference_over_sampling, :]
-    ref_u_chunk = reference_u[current_idx:current_idx + n_mpc_nodes * reference_over_sampling, :]
+    ref_traj_chunk = reference_traj[
+        current_idx : current_idx + (n_mpc_nodes + 1) * reference_over_sampling, :
+    ]
+    ref_u_chunk = reference_u[
+        current_idx : current_idx + n_mpc_nodes * reference_over_sampling, :
+    ]
 
     # Indices for down-sampling the reference to number of MPC nodes
-    downsample_ref_ind = np.arange(0, min(reference_over_sampling * (n_mpc_nodes + 1), ref_traj_chunk.shape[0]),
-                                   reference_over_sampling, dtype=int)
+    downsample_ref_ind = np.arange(
+        0,
+        min(reference_over_sampling * (n_mpc_nodes + 1), ref_traj_chunk.shape[0]),
+        reference_over_sampling,
+        dtype=int,
+    )
 
     # Sparser references (same dt as node separation)
     ref_traj_chunk = ref_traj_chunk[downsample_ref_ind, :]
-    ref_u_chunk = ref_u_chunk[downsample_ref_ind[:max(len(downsample_ref_ind) - 1, 1)], :]
+    ref_u_chunk = ref_u_chunk[
+        downsample_ref_ind[: max(len(downsample_ref_ind) - 1, 1)], :
+    ]
 
     return ref_traj_chunk, ref_u_chunk

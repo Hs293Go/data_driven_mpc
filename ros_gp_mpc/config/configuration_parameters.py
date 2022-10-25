@@ -20,10 +20,10 @@ class DirectoryConfig:
     """
 
     _dir_path = os.path.dirname(os.path.realpath(__file__))
-    SAVE_DIR = _dir_path + '/../results/model_fitting'
-    RESULTS_DIR = _dir_path + '/../results'
-    CONFIG_DIR = _dir_path + ''
-    DATA_DIR = _dir_path + '/../data'
+    SAVE_DIR = _dir_path + "/../results/model_fitting"
+    RESULTS_DIR = _dir_path + "/../results"
+    CONFIG_DIR = _dir_path + ""
+    DATA_DIR = _dir_path + "/../data"
 
 
 class SimpleSimConfig:
@@ -44,10 +44,10 @@ class SimpleSimConfig:
     # Choice of disturbances modeled in our Simplified Simulator. For more details about the parameters used refer to
     # the script: src/quad_mpc/quad_3d.py.
     simulation_disturbances = {
-        "noisy": True,                       # Thrust and torque gaussian noises
-        "drag": True,                        # 2nd order polynomial aerodynamic drag effect
-        "payload": False,                    # Payload force in the Z axis
-        "motor_noise": True                  # Asymmetric voltage noise in the motors
+        "noisy": True,  # Thrust and torque gaussian noises
+        "drag": True,  # 2nd order polynomial aerodynamic drag effect
+        "payload": False,  # Payload force in the Z axis
+        "motor_noise": True,  # Asymmetric voltage noise in the motors
     }
 
 
@@ -58,12 +58,7 @@ class ModelFitConfig:
 
     # ## Dataset loading ## #
     ds_name = "simplified_sim_dataset"
-    ds_metadata = {
-        "noisy": True,
-        "drag": True,
-        "payload": False,
-        "motor_noise": True
-    }
+    ds_metadata = {"noisy": True, "drag": True, "payload": False, "motor_noise": True}
 
     # ds_metadata = {
     #     "gazebo": "default",
@@ -81,9 +76,11 @@ class ModelFitConfig:
     y_viz = [7, 8, 9]
 
     # ## Data post-processing ## #
-    histogram_bins = 40              # Cluster data using histogram binning
-    histogram_threshold = 0.001      # Remove bins where the total ratio of data is lower than this threshold
-    velocity_cap = 16                # Also remove datasets point if abs(velocity) > x_cap
+    histogram_bins = 40  # Cluster data using histogram binning
+    histogram_threshold = (
+        0.001  # Remove bins where the total ratio of data is lower than this threshold
+    )
+    velocity_cap = 16  # Also remove datasets point if abs(velocity) > x_cap
 
     # ############# Experimental ############# #
 

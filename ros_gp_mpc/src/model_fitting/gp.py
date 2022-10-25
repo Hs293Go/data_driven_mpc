@@ -12,30 +12,28 @@ this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
 
-import numpy as np
+from operator import itemgetter
+
 import casadi as cs
 import joblib
-
-from tqdm import tqdm
-from operator import itemgetter
-from numpy.linalg import inv, cholesky, lstsq
+import numpy as np
+from numpy.linalg import cholesky, inv, lstsq
 from numpy.random import mtrand
 from scipy.optimize import minimize
-from scipy.spatial.distance import pdist, cdist, squareform
-
-from src.utils.utils import safe_mknode_recursive, make_bz_matrix
+from scipy.spatial.distance import cdist, pdist, squareform
+from src.utils.utils import make_bz_matrix, safe_mknode_recursive
+from tqdm import tqdm
 
 
 class CustomKernelFunctions:
-
     def __init__(self, kernel_func, params=None):
 
         self.params = params
         self.kernel_type = kernel_func
 
-        if self.kernel_type == 'squared_exponential':
+        if self.kernel_type == "squared_exponential":
             if params is None:
-                self.params = {'l': [1.0], 'sigma_f': 1.0}
+                self.params = {"l": [1.0], "sigma_f": 1.0}
             self.kernel = self.squared_exponential_kernel
         else:
             raise NotImplementedError("only squared_exponential is supported")
@@ -46,14 +44,18 @@ class CustomKernelFunctions:
         return self.kernel(x_1, x_2)
 
     def __str__(self):
-        if self.kernel_type == 'squared_exponential':
-            len_scales = np.reshape(self.params['l'], -1)
-            len_scale_str = '['
+        if self.kernel_type == "squared_exponential":
+            len_scales = np.reshape(self.params["l"], -1)
+            len_scale_str = "["
             for i in range(len(len_scales)):
-                len_scale_str += '%.3f, ' % len_scales[i] if i < len(len_scales) - 1 else '%.3f' % len_scales[i]
-            len_scale_str += ']'
-            summary = '%.3f' % self.params['sigma_f']
-            summary += '**2*RBF(length_scale=' + len_scale_str + ')'
+                len_scale_str += (
+                    "%.3f, " % len_scales[i]
+                    if i < len(len_scales) - 1
+                    else "%.3f" % len_scales[i]
+                )
+            len_scale_str += "]"
+            summary = "%.3f" % self.params["sigma_f"]
+            summary += "**2*RBF(length_scale=" + len_scale_str + ")"
             return summary
 
         else:
@@ -61,11 +63,13 @@ class CustomKernelFunctions:
 
     def get_trainable_parameters(self):
         trainable_params = []
-        if self.kernel_type == 'squared_exponential':
-            trainable_params += \
-                np.reshape(np.squeeze(self.params['l']), -1).tolist() if hasattr(self.params['l'], "__len__") \
-                else [self.params['l']]
-            trainable_params += [self.params['sigma_f']]
+        if self.kernel_type == "squared_exponential":
+            trainable_params += (
+                np.reshape(np.squeeze(self.params["l"]), -1).tolist()
+                if hasattr(self.params["l"], "__len__")
+                else [self.params["l"]]
+            )
+            trainable_params += [self.params["sigma_f"]]
         return trainable_params
 
     @staticmethod
@@ -74,8 +78,10 @@ class CustomKernelFunctions:
         if np.ndim(length_scale) > 1:
             raise ValueError("length_scale cannot be of dimension greater than 1")
         if np.ndim(length_scale) == 1 and x.shape[1] != length_scale.shape[0]:
-            raise ValueError("Anisotropic kernel must have the same number of dimensions as data (%d!=%d)"
-                             % (length_scale.shape[0], x.shape[1]))
+            raise ValueError(
+                "Anisotropic kernel must have the same number of dimensions as data (%d!=%d)"
+                % (length_scale.shape[0], x.shape[1])
+            )
         return length_scale
 
     def squared_exponential_kernel(self, x_1, x_2=None):
@@ -95,22 +101,22 @@ class CustomKernelFunctions:
             return self._squared_exponential_kernel_cs(x_1, x_2)
 
         # Length scale parameter
-        len_scale = self.params['l'] if 'l' in self.params.keys() else 1.0
+        len_scale = self.params["l"] if "l" in self.params.keys() else 1.0
 
         # Vertical variation parameter
-        sigma_f = self.params['sigma_f'] if 'sigma_f' in self.params.keys() else 1.0
+        sigma_f = self.params["sigma_f"] if "sigma_f" in self.params.keys() else 1.0
 
         x_1 = np.atleast_2d(x_1)
         length_scale = self._check_length_scale(x_1, len_scale)
         if x_2 is None:
-            dists = pdist(x_1 / length_scale, metric='sqeuclidean')
-            k = sigma_f * np.exp(-.5 * dists)
+            dists = pdist(x_1 / length_scale, metric="sqeuclidean")
+            k = sigma_f * np.exp(-0.5 * dists)
             # convert from upper-triangular matrix to square matrix
             k = squareform(k)
             np.fill_diagonal(k, 1)
         else:
-            dists = cdist(x_1 / length_scale, x_2 / length_scale, metric='sqeuclidean')
-            k = sigma_f * np.exp(-.5 * dists)
+            dists = cdist(x_1 / length_scale, x_2 / length_scale, metric="sqeuclidean")
+            k = sigma_f * np.exp(-0.5 * dists)
 
         return k
 
@@ -123,19 +129,19 @@ class CustomKernelFunctions:
         """
 
         # Length scale parameter
-        len_scale = self.params['l'] if 'l' in self.params.keys() else 1.0
+        len_scale = self.params["l"] if "l" in self.params.keys() else 1.0
         # Vertical variation parameter
-        sigma_f = self.params['sigma_f'] if 'sigma_f' in self.params.keys() else 1.0
+        sigma_f = self.params["sigma_f"] if "sigma_f" in self.params.keys() else 1.0
 
         if x_1.shape != x_2.shape and x_2.shape[0] == 1:
             tiling_ones = cs.MX.ones(x_1.shape[0], 1)
             d = x_1 - cs.mtimes(tiling_ones, x_2)
-            dist = cs.sum2(d ** 2 / cs.mtimes(tiling_ones, cs.MX(len_scale ** 2).T))
+            dist = cs.sum2(d**2 / cs.mtimes(tiling_ones, cs.MX(len_scale**2).T))
         else:
             d = x_1 - x_2
-            dist = cs.sum1(d ** 2 / cs.MX(len_scale ** 2))
+            dist = cs.sum1(d**2 / cs.MX(len_scale**2))
 
-        return sigma_f * cs.SX.exp(-.5 * dist)
+        return sigma_f * cs.SX.exp(-0.5 * dist)
 
     def diff(self, z, z_train):
         """
@@ -150,11 +156,15 @@ class CustomKernelFunctions:
         against the training dataset.
         """
 
-        if self.kernel_type != 'squared_exponential':
+        if self.kernel_type != "squared_exponential":
             raise NotImplementedError
 
-        len_scale = self.params['l'] if len(self.params['l']) > 0 else self.params['l'] * cs.MX.ones(z_train.shape[1])
-        len_scale = np.atleast_2d(len_scale ** 2)
+        len_scale = (
+            self.params["l"]
+            if len(self.params["l"]) > 0
+            else self.params["l"] * cs.MX.ones(z_train.shape[1])
+        )
+        len_scale = np.atleast_2d(len_scale**2)
 
         # Broadcast z vector to have the shape of z_train (tile z to to the number of training points n)
         z_tile = cs.mtimes(cs.MX.ones(z_train.shape[0], 1), z.T)
@@ -162,13 +172,25 @@ class CustomKernelFunctions:
         # Compute k_zZ. Broadcast it to shape of z_tile and z_train, i.e. by the number of variables in z.
         k_zZ = cs.mtimes(cs.MX.ones(z_train.shape[1], 1), self.__call__(z_train, z.T).T)
 
-        return - k_zZ * (z_tile - z_train).T / cs.mtimes(cs.MX.ones(z_train.shape[0], 1), len_scale).T
+        return (
+            -k_zZ
+            * (z_tile - z_train).T
+            / cs.mtimes(cs.MX.ones(z_train.shape[0], 1), len_scale).T
+        )
 
 
 class CustomGPRegression:
-
-    def __init__(self, x_features, u_features, reg_dim, mean=None, y_mean=None, kernel=None, sigma_n=1e-8,
-                 n_restarts=1):
+    def __init__(
+        self,
+        x_features,
+        u_features,
+        reg_dim,
+        mean=None,
+        y_mean=None,
+        kernel=None,
+        sigma_n=1e-8,
+        n_restarts=1,
+    ):
         """
         :param x_features: list of indices for the quadrotor state-derived features
         :param u_features: list of indices for the input state-derived features
@@ -181,7 +203,7 @@ class CustomGPRegression:
         """
 
         if kernel is None:
-            kernel = CustomKernelFunctions('squared_exponential')
+            kernel = CustomKernelFunctions("squared_exponential")
 
         # Avoid non-invertible error
         assert sigma_n != 0.0
@@ -204,11 +226,11 @@ class CustomGPRegression:
         # Pre-computed training data kernel
         self._K = np.zeros((0, 0))
         self._K_inv = np.zeros((0, 0))
-        self._K_inv_y = np.zeros((0, ))
+        self._K_inv_y = np.zeros((0,))
 
         # Training dataset memory
         self._x_train = np.zeros((0, 0))
-        self._y_train = np.zeros((0, ))
+        self._y_train = np.zeros((0,))
 
         # CasADi symbolic equivalents
         self._K_cs = None
@@ -281,12 +303,21 @@ class CustomGPRegression:
         sigma_f = np.exp(theta[-1])
         sigma_n = self.sigma_n
 
-        kernel = CustomKernelFunctions(self.kernel_type, params={'l': l_params, 'sigma_f': sigma_f})
-        k_train = kernel(self.x_train, self.x_train) + sigma_n ** 2 * np.eye(len(self.x_train))
+        kernel = CustomKernelFunctions(
+            self.kernel_type, params={"l": l_params, "sigma_f": sigma_f}
+        )
+        k_train = kernel(self.x_train, self.x_train) + sigma_n**2 * np.eye(
+            len(self.x_train)
+        )
         l_mat = cholesky(k_train)
-        nll = np.sum(np.log(np.diagonal(l_mat))) + \
-            0.5 * self.y_train.T.dot(lstsq(l_mat.T, lstsq(l_mat, self.y_train, rcond=None)[0], rcond=None)[0]) + \
-            0.5 * len(self.x_train) * np.log(2 * np.pi)
+        nll = (
+            np.sum(np.log(np.diagonal(l_mat)))
+            + 0.5
+            * self.y_train.T.dot(
+                lstsq(l_mat.T, lstsq(l_mat, self.y_train, rcond=None)[0], rcond=None)[0]
+            )
+            + 0.5 * len(self.x_train) * np.log(2 * np.pi)
+        )
         return nll
 
     def _nll(self, x_train, y_train):
@@ -305,19 +336,28 @@ class CustomGPRegression:
             sigma_f = np.exp(theta[-2])
             sigma_n = np.exp(theta[-1])
 
-            kernel = CustomKernelFunctions(self.kernel_type, params={'l': l_params, 'sigma_f': sigma_f})
-            k_train = kernel(x_train, x_train) + sigma_n ** 2 * np.eye(len(x_train))
+            kernel = CustomKernelFunctions(
+                self.kernel_type, params={"l": l_params, "sigma_f": sigma_f}
+            )
+            k_train = kernel(x_train, x_train) + sigma_n**2 * np.eye(len(x_train))
             l_mat = cholesky(k_train)
-            nll = np.sum(np.log(np.diagonal(l_mat))) + \
-                0.5 * y_train.T.dot(lstsq(l_mat.T, lstsq(l_mat, y_train, rcond=None)[0], rcond=None)[0]) + \
-                0.5 * len(x_train) * np.log(2 * np.pi)
+            nll = (
+                np.sum(np.log(np.diagonal(l_mat)))
+                + 0.5
+                * y_train.T.dot(
+                    lstsq(l_mat.T, lstsq(l_mat, y_train, rcond=None)[0], rcond=None)[0]
+                )
+                + 0.5 * len(x_train) * np.log(2 * np.pi)
+            )
             return nll
 
         return nll_func
 
     def _constrained_minimization(self, x_train, y_train, x_0, bounds):
         try:
-            res = minimize(self._nll(x_train, y_train), x0=x_0, bounds=bounds, method='L-BFGS-B')
+            res = minimize(
+                self._nll(x_train, y_train), x0=x_0, bounds=bounds, method="L-BFGS-B"
+            )
             return np.exp(res.x), res.fun
         except np.linalg.LinAlgError:
             return x_0, np.inf
@@ -340,13 +380,19 @@ class CustomGPRegression:
 
         y_train -= self.y_mean
 
-        optima = [self._constrained_minimization(x_train, y_train, initial_guess, log_bounds)]
+        optima = [
+            self._constrained_minimization(x_train, y_train, initial_guess, log_bounds)
+        ]
 
         if self.n_restarts > 1:
             random_state = mtrand._rand
             for iteration in range(self.n_restarts - 1):
                 theta_initial = random_state.uniform(log_bounds[:, 0], log_bounds[:, 1])
-                optima.append(self._constrained_minimization(x_train, y_train, theta_initial, log_bounds))
+                optima.append(
+                    self._constrained_minimization(
+                        x_train, y_train, theta_initial, log_bounds
+                    )
+                )
 
         lml_values = list(map(itemgetter(1), optima))
         theta_opt = optima[int(np.argmin(lml_values))][0]
@@ -355,10 +401,14 @@ class CustomGPRegression:
         l_new = theta_opt[:-2]
         sigma_f_new = theta_opt[-2]
         self.sigma_n = theta_opt[-1]
-        self.kernel = CustomKernelFunctions(self.kernel_type, params={'l': l_new, 'sigma_f': sigma_f_new})
+        self.kernel = CustomKernelFunctions(
+            self.kernel_type, params={"l": l_new, "sigma_f": sigma_f_new}
+        )
 
         # Pre-compute kernel matrices
-        self.K = self.kernel(x_train, x_train) + self.sigma_n ** 2 * np.eye(len(x_train))
+        self.K = self.kernel(x_train, x_train) + self.sigma_n**2 * np.eye(
+            len(x_train)
+        )
         self.K_inv = inv(self.K)
         self.K_inv_y = self.K_inv.dot(y_train)
 
@@ -389,16 +439,16 @@ class CustomGPRegression:
         features.
         """
 
-        if self.kernel_type != 'squared_exponential':
+        if self.kernel_type != "squared_exponential":
             raise NotImplementedError
 
         # Symbolic variable for input state
-        z = cs.MX.sym('z', self.x_train.shape[1])
+        z = cs.MX.sym("z", self.x_train.shape[1])
 
         # Compute the kernel derivative:
         dgpdz = cs.mtimes(self.kernel.diff(z, self._x_train_cs), self._K_inv_y_cs)
 
-        return cs.Function('f', [z], [dgpdz], ['z'], ['dgpdz'])
+        return cs.Function("f", [z], [dgpdz], ["z"], ["dgpdz"])
 
     def predict(self, x_test, return_std=False, return_cov=False):
         """
@@ -418,7 +468,9 @@ class CustomGPRegression:
         x_test = np.atleast_2d(x_test) if isinstance(x_test, np.ndarray) else x_test
 
         if isinstance(x_test, cs.MX):
-            return self._predict_sym(x_test=x_test, return_std=return_std, return_cov=return_cov)
+            return self._predict_sym(
+                x_test=x_test, return_std=return_std, return_cov=return_cov
+            )
 
         if isinstance(x_test, cs.DM):
             x_test = np.array(x_test).T
@@ -438,7 +490,7 @@ class CustomGPRegression:
 
         # Return covariance
         if return_cov:
-            return mu_s, std_s ** 2
+            return mu_s, std_s**2
 
         # Return standard deviation
         return mu_s, std_s
@@ -457,7 +509,7 @@ class CustomGPRegression:
         mu_s = cs.mtimes(k_s.T, self._K_inv_y_cs) + self.y_mean
 
         if not return_std and not return_cov:
-            return {'mu': mu_s}
+            return {"mu": mu_s}
 
         k_ss = self.kernel(x_test, x_test) + 1e-8 * cs.MX.eye(x_test.shape[1])
 
@@ -466,9 +518,9 @@ class CustomGPRegression:
         cov_s = cs.diag(cov_s)
 
         if return_std:
-            return {'mu': mu_s, 'std': np.sqrt(cov_s)}
+            return {"mu": mu_s, "std": np.sqrt(cov_s)}
 
-        return {'mu': mu_s, 'cov': cov_s}
+        return {"mu": mu_s, "cov": cov_s}
 
     def sample_y(self, x_test, n_samples=3):
         """
@@ -504,15 +556,15 @@ class CustomGPRegression:
             "x_features": self.x_features,
             "u_features": self.u_features,
             "mean": self.mean,
-            "y_mean": self.y_mean
+            "y_mean": self.y_mean,
         }
 
-        split_path = path.split('/')
-        directory = '/'.join(split_path[:-1])
+        split_path = path.split("/")
+        directory = "/".join(split_path[:-1])
         file = split_path[-1]
         safe_mknode_recursive(directory, file, overwrite=True)
 
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             joblib.dump(saved_vars, f)
 
     def load(self, data_dict):
@@ -521,15 +573,21 @@ class CustomGPRegression:
         :param data_dict: a dictionary with all the pre-trained matrices of the GP regressor
         """
 
-        self.K_inv = data_dict['k_inv']
-        self.K_inv_y = data_dict['k_inv_y']
-        self.x_train = data_dict['x_train']
-        self.y_train = data_dict['y_train']
-        self.kernel_type = data_dict['kernel_type']
-        self.kernel = CustomKernelFunctions(self.kernel_type, data_dict['kernel_params'])
-        self.sigma_n = data_dict['sigma_n']
-        self.mean = data_dict['mean'] if 'mean' in data_dict.keys() else np.array([0, 0, 0])
-        self.y_mean = data_dict['y_mean'] if 'y_mean' in data_dict.keys() else np.array(0)
+        self.K_inv = data_dict["k_inv"]
+        self.K_inv_y = data_dict["k_inv_y"]
+        self.x_train = data_dict["x_train"]
+        self.y_train = data_dict["y_train"]
+        self.kernel_type = data_dict["kernel_type"]
+        self.kernel = CustomKernelFunctions(
+            self.kernel_type, data_dict["kernel_params"]
+        )
+        self.sigma_n = data_dict["sigma_n"]
+        self.mean = (
+            data_dict["mean"] if "mean" in data_dict.keys() else np.array([0, 0, 0])
+        )
+        self.y_mean = (
+            data_dict["y_mean"] if "y_mean" in data_dict.keys() else np.array(0)
+        )
         self.compute_gp_jac()
 
 
@@ -570,10 +628,14 @@ class GPEnsemble:
 
     @property
     def B_z(self):
-        return self.B_z_dict[next(iter(self.B_z_dict))] if self.homogeneous else self.B_z_dict
+        return (
+            self.B_z_dict[next(iter(self.B_z_dict))]
+            if self.homogeneous
+            else self.B_z_dict
+        )
 
     def add_model(self, gp):
-        """"
+        """ "
         :param gp: A list of n CustomGPRegression objects, where n is the number of GP's used to divide the feature
         space domain of the dimension in particular.
         :type gp: list
@@ -604,7 +666,9 @@ class GPEnsemble:
             self.no_ensemble = False
 
         # Pre-compute B_z matrix
-        self.B_z_dict[gp_dim] = make_bz_matrix(x_dims=13, u_dims=4, x_feats=gp[0].x_features, u_feats=gp[0].u_features)
+        self.B_z_dict[gp_dim] = make_bz_matrix(
+            x_dims=13, u_dims=4, x_feats=gp[0].x_features, u_feats=gp[0].u_features
+        )
 
     def get_z(self, x, u, dim):
         """
@@ -629,8 +693,17 @@ class GPEnsemble:
 
         return z
 
-    def predict(self, x_test, u_test, return_std=False, return_cov=False, return_gp_id=False, return_z=False,
-                progress_bar=False, gp_idx=None):
+    def predict(
+        self,
+        x_test,
+        u_test,
+        return_std=False,
+        return_cov=False,
+        return_gp_id=False,
+        return_z=False,
+        progress_bar=False,
+        gp_idx=None,
+    ):
         """
         Runs GP inference. First, select the GP optimally for the test samples. Then, run inference on that GP.
         :param x_test: array of shape d x n. n is the number of test samples and d their dimension.
@@ -687,7 +760,9 @@ class GPEnsemble:
         noise_prior = []
 
         # Test data loop
-        range_data = tqdm(range(x_test.shape[1])) if progress_bar else range(x_test.shape[1])
+        range_data = (
+            tqdm(range(x_test.shape[1])) if progress_bar else range(x_test.shape[1])
+        )
         for j in range_data:
 
             pred_j = []
@@ -696,16 +771,20 @@ class GPEnsemble:
 
             # Output dim loop
             for dim in self.gp.keys():
-                out = self.gp[dim][gp_idx[dim][j]].predict(z[dim][:, j], return_std, return_cov)
+                out = self.gp[dim][gp_idx[dim][j]].predict(
+                    z[dim][:, j], return_std, return_cov
+                )
                 if not return_std and not return_cov:
                     if isinstance(out, dict):
-                        pred_j += [out['mu']]
+                        pred_j += [out["mu"]]
                     else:
                         pred_j += [out]
                 else:
                     if isinstance(out, dict):
-                        pred_j += [out['mu']]
-                        cov_or_std_j += [out['cov'] if 'cov' in out.keys() else out['std']]
+                        pred_j += [out["mu"]]
+                        cov_or_std_j += [
+                            out["cov"] if "cov" in out.keys() else out["std"]
+                        ]
                     else:
                         pred_j += [out[0]]
                         cov_or_std_j += [out[1]]
@@ -716,8 +795,11 @@ class GPEnsemble:
             noise_prior += [noise_prior_j]
 
         # Convert to CasADi symbolic or numpy matrix depending on the input type
-        pred = cs.horzcat(*[cs.vertcat(*pred[i]) for i in range(x_test.shape[1])]) \
-            if isinstance(x_test, cs.MX) else np.squeeze(np.array(pred)).T
+        pred = (
+            cs.horzcat(*[cs.vertcat(*pred[i]) for i in range(x_test.shape[1])])
+            if isinstance(x_test, cs.MX)
+            else np.squeeze(np.array(pred)).T
+        )
 
         outputs["pred"] = pred
 
@@ -725,10 +807,16 @@ class GPEnsemble:
             return outputs
 
         # Convert to CasADi symbolic or numpy matrix depending on the input type
-        cov_or_std = cs.horzcat(*[cs.vertcat(*cov_or_std[i]) for i in range(x_test.shape[1])]) \
-            if isinstance(x_test, cs.MX) else np.squeeze(np.array(cov_or_std)).T
-        noise_prior = cs.horzcat(*[cs.vertcat(*noise_prior[i]) for i in range(x_test.shape[1])]) \
-            if isinstance(x_test, cs.MX) else np.squeeze(np.array(noise_prior)).T
+        cov_or_std = (
+            cs.horzcat(*[cs.vertcat(*cov_or_std[i]) for i in range(x_test.shape[1])])
+            if isinstance(x_test, cs.MX)
+            else np.squeeze(np.array(cov_or_std)).T
+        )
+        noise_prior = (
+            cs.horzcat(*[cs.vertcat(*noise_prior[i]) for i in range(x_test.shape[1])])
+            if isinstance(x_test, cs.MX)
+            else np.squeeze(np.array(noise_prior)).T
+        )
 
         outputs["cov_or_std"] = cov_or_std
         outputs["noise_cov"] = noise_prior
@@ -767,7 +855,12 @@ class GPEnsemble:
         centroids = self.gp_centroids[dim]
 
         # Select subset of features for current dimension
-        return np.argmin(np.sqrt(np.sum((z[np.newaxis, :, :] - centroids[:, :, np.newaxis]) ** 2, 1)), 0)
+        return np.argmin(
+            np.sqrt(
+                np.sum((z[np.newaxis, :, :] - centroids[:, :, np.newaxis]) ** 2, 1)
+            ),
+            0,
+        )
 
     def homogeneous_feature_space(self):
         if self.out_dim == 1:

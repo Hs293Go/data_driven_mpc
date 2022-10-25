@@ -12,26 +12,41 @@ this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
 
-import os
-import time
 import argparse
+import os
 import subprocess
-import numpy as np
-from tqdm import tqdm
+import time
+
 import matplotlib.pyplot as plt
-
-from src.utils.utils import safe_mkdir_recursive, load_pickled_models
-from src.utils.utils import distance_maximizing_points, get_model_dir_and_file
-from src.utils.utils import sample_random_points
-from src.model_fitting.gp import CustomKernelFunctions as npKernelFunctions
-from src.model_fitting.gp import CustomGPRegression as npGPRegression
-from src.model_fitting.gp import GPEnsemble
-from src.model_fitting.gp_common import GPDataset, restore_gp_regressors, read_dataset
-from src.model_fitting.gp_visualization import gp_visualization_experiment
+import numpy as np
 from config.configuration_parameters import ModelFitConfig as Conf
+from src.model_fitting.gp import CustomGPRegression as npGPRegression
+from src.model_fitting.gp import CustomKernelFunctions as npKernelFunctions
+from src.model_fitting.gp import GPEnsemble
+from src.model_fitting.gp_common import GPDataset, read_dataset, restore_gp_regressors
+from src.model_fitting.gp_visualization import gp_visualization_experiment
+from src.utils.utils import (
+    distance_maximizing_points,
+    get_model_dir_and_file,
+    load_pickled_models,
+    safe_mkdir_recursive,
+    sample_random_points,
+)
+from tqdm import tqdm
 
 
-def plot_gp_regression(x_test, y_test, x_train, y_train, gp_mean, gp_std, gp_regressor, labels, title='', n_samples=3):
+def plot_gp_regression(
+    x_test,
+    y_test,
+    x_train,
+    y_train,
+    gp_mean,
+    gp_std,
+    gp_regressor,
+    labels,
+    title="",
+    n_samples=3,
+):
 
     # Assert the number of provided labels is coherent with the feature dimension [1] of the x vectors
     if len(x_test.shape) == 1:
@@ -57,27 +72,38 @@ def plot_gp_regression(x_test, y_test, x_train, y_train, gp_mean, gp_std, gp_reg
         x_sort_ind_test = np.argsort(x_test[:, i])
 
         # Plot gp mean line
-        plt.plot(x_test[x_sort_ind_test, i], gp_mean[x_sort_ind_test], 'k', lw=3, zorder=9)
+        plt.plot(
+            x_test[x_sort_ind_test, i], gp_mean[x_sort_ind_test], "k", lw=3, zorder=9
+        )
 
         # Plot gp std area
-        plt.fill_between(x_test[x_sort_ind_test, i],
-                         gp_mean[x_sort_ind_test] - 3 * gp_std[x_sort_ind_test],
-                         gp_mean[x_sort_ind_test] + 3 * gp_std[x_sort_ind_test],
-                         alpha=0.2, color='k')
+        plt.fill_between(
+            x_test[x_sort_ind_test, i],
+            gp_mean[x_sort_ind_test] - 3 * gp_std[x_sort_ind_test],
+            gp_mean[x_sort_ind_test] + 3 * gp_std[x_sort_ind_test],
+            alpha=0.2,
+            color="k",
+        )
 
         if y_samples is not None:
-            plt.plot(x_test[x_sort_ind_test, i], y_samples[x_sort_ind_test], '-o', lw=1)
+            plt.plot(x_test[x_sort_ind_test, i], y_samples[x_sort_ind_test], "-o", lw=1)
             plt.xlim(min(x_test[:, i]), max(x_test[:, i]))
-            plt.ylim(min(np.min(y_samples), np.min(gp_mean - 3 * gp_std)),
-                     max(np.max(y_samples), np.max(gp_mean + 3 * gp_std)))
+            plt.ylim(
+                min(np.min(y_samples), np.min(gp_mean - 3 * gp_std)),
+                max(np.max(y_samples), np.max(gp_mean + 3 * gp_std)),
+            )
 
         if x_train is not None and y_train is not None:
-            plt.scatter(x_train[:, i], y_train, c='r', s=50, zorder=10, edgecolors=(0, 0, 0))
+            plt.scatter(
+                x_train[:, i], y_train, c="r", s=50, zorder=10, edgecolors=(0, 0, 0)
+            )
 
         if y_test is not None:
-            plt.plot(x_test[x_sort_ind_test, i], y_test[x_sort_ind_test], lw=1, marker='o')
+            plt.plot(
+                x_test[x_sort_ind_test, i], y_test[x_sort_ind_test], lw=1, marker="o"
+            )
 
-        if i == 0 and title != '':
+        if i == 0 and title != "":
             plt.title(title, fontsize=12)
 
         plt.ylabel(labels[i])
@@ -85,7 +111,17 @@ def plot_gp_regression(x_test, y_test, x_train, y_train, gp_mean, gp_std, gp_reg
     plt.tight_layout()
 
 
-def gp_train_and_save(x, y, gp_regressors, save_model, save_file, save_path, y_dims, cluster_n, progress_bar=True):
+def gp_train_and_save(
+    x,
+    y,
+    gp_regressors,
+    save_model,
+    save_file,
+    save_path,
+    y_dims,
+    cluster_n,
+    progress_bar=True,
+):
     """
     Trains and saves the 'm' GP's in the gp_regressors list. Each of these regressors will predict on one of the output
     variables only.
@@ -118,17 +154,35 @@ def gp_train_and_save(x, y, gp_regressors, save_model, save_file, save_path, y_d
         # Fit one regressor for each output dimension
         gp_regressors[y_dim_reg].fit(x[y_dim_reg], y[y_dim_reg])
         if save_model:
-            full_path = os.path.join(save_path, save_file + '_' + str(dim) + '_' + str(cluster_n) + '.pkl')
+            full_path = os.path.join(
+                save_path, save_file + "_" + str(dim) + "_" + str(cluster_n) + ".pkl"
+            )
             gp_regressors[y_dim_reg].save(full_path)
 
     return gp_regressors
 
 
-def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
-         x_cap, hist_bins, hist_thresh,
-         n_train_points=50, n_restarts=10, n_clusters=1, load_clusters=False, model_name="model",
-         dense_gp_name="model", dense_gp_points=100, dense_gp_version="", use_dense=False,
-         visualize_data=False, visualize_model=False):
+def main(
+    x_features,
+    u_features,
+    reg_y_dim,
+    quad_sim_options,
+    dataset_name,
+    x_cap,
+    hist_bins,
+    hist_thresh,
+    n_train_points=50,
+    n_restarts=10,
+    n_clusters=1,
+    load_clusters=False,
+    model_name="model",
+    dense_gp_name="model",
+    dense_gp_points=100,
+    dense_gp_version="",
+    use_dense=False,
+    visualize_data=False,
+    visualize_model=False,
+):
 
     """
     Reads the dataset specified and trains a GP model or ensemble on it. The regressed variables is the time-derivative
@@ -166,45 +220,82 @@ def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
 
     # #### Prepare saving directory for GP's #### #
     # Get git commit hash for saving the model
-    git_version = ''
+    git_version = ""
     try:
-        git_version = subprocess.check_output(['git', 'describe', '--always']).strip().decode("utf-8")
+        git_version = (
+            subprocess.check_output(["git", "describe", "--always"])
+            .strip()
+            .decode("utf-8")
+        )
     except subprocess.CalledProcessError as e:
         print(e.returncode, e.output)
     print("The model will be saved using hash: %s" % git_version)
 
-    gp_name_dict = {"git": git_version, "model_name": model_name, "params": quad_sim_options}
+    gp_name_dict = {
+        "git": git_version,
+        "model_name": model_name,
+        "params": quad_sim_options,
+    }
     save_file_path, save_file_name = get_model_dir_and_file(gp_name_dict)
 
     # #### DATASET LOADING #### #
     if isinstance(dataset_name, str):
         df_train = read_dataset(dataset_name, True, quad_sim_options)
-        gp_dataset = GPDataset(df_train, x_features, u_features, reg_y_dim,
-                               cap=x_cap, n_bins=hist_bins, thresh=hist_thresh, visualize_data=visualize_data)
+        gp_dataset = GPDataset(
+            df_train,
+            x_features,
+            u_features,
+            reg_y_dim,
+            cap=x_cap,
+            n_bins=hist_bins,
+            thresh=hist_thresh,
+            visualize_data=visualize_data,
+        )
     elif isinstance(dataset_name, GPDataset):
         gp_dataset = dataset_name
     else:
         raise TypeError("dataset_name must be a string or a GPDataset instance.")
 
     # Make clusters for multi-gp prediction
-    gp_dataset.cluster(n_clusters, load_clusters=load_clusters, save_dir=save_file_path, visualize_data=visualize_data)
+    gp_dataset.cluster(
+        n_clusters,
+        load_clusters=load_clusters,
+        save_dir=save_file_path,
+        visualize_data=visualize_data,
+    )
 
     # #### LOAD DENSE GP IF USING GP ENSEMBLE #### #
     if use_dense:
-        load_options = {"git": dense_gp_version, "model_name": dense_gp_name, "params": quad_sim_options}
+        load_options = {
+            "git": dense_gp_version,
+            "model_name": dense_gp_name,
+            "params": quad_sim_options,
+        }
         loaded_models = load_pickled_models(model_options=load_options)
 
         if loaded_models is None:
             print("Model not found. Training a new dense GP with ")
             # Train model as accurate as possible. If dense_gp_points is specified, train a gp with that amount of
             # straining samples and use it to generate a dataset for the GP ensemble.
-            dense_gp = main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name, x_cap, hist_bins,
-                            hist_thresh, n_train_points=dense_gp_points, n_restarts=n_restarts,
-                            model_name=dense_gp_name)
+            dense_gp = main(
+                x_features,
+                u_features,
+                reg_y_dim,
+                quad_sim_options,
+                dataset_name,
+                x_cap,
+                hist_bins,
+                hist_thresh,
+                n_train_points=dense_gp_points,
+                n_restarts=n_restarts,
+                model_name=dense_gp_name,
+            )
 
         else:
             dense_gp = restore_gp_regressors(loaded_models)
-            print("Loaded dense GP model from: %s/%s" % (dense_gp_version, dense_gp_name))
+            print(
+                "Loaded dense GP model from: %s/%s" % (dense_gp_version, dense_gp_name)
+            )
 
     else:
         dense_gp = None
@@ -215,11 +306,16 @@ def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
 
     # Prior parameters
     sigma_f = 0.5
-    length_scale = .1
+    length_scale = 0.1
     sigma_n = 0.01
 
-    gp_params = {"x_features": x_features, "u_features": u_features, "reg_dim": reg_y_dim,
-                 "sigma_n": sigma_n, "n_restarts": n_restarts}
+    gp_params = {
+        "x_features": x_features,
+        "u_features": u_features,
+        "reg_dim": reg_y_dim,
+        "sigma_n": sigma_n,
+        "n_restarts": n_restarts,
+    }
 
     # Get all cluster centroids for the current output dimension
     centroids = gp_dataset.centroids
@@ -237,7 +333,12 @@ def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
         # Select a base set of training points for the current cluster using PCA that are as separate from each
         # other as possible
         selected_points = distance_maximizing_points(
-            cluster_x_points, cluster_mean, n_train_points=n_train_points, dense_gp=dense_gp, plot=False)
+            cluster_x_points,
+            cluster_mean,
+            n_train_points=n_train_points,
+            dense_gp=dense_gp,
+            plot=False,
+        )
 
         cluster_y_mean = np.mean(cluster_y_points, 0)
 
@@ -251,10 +352,10 @@ def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
             # Generate a new dataset of synthetic data composed of x and y values
             x_mock = np.zeros((13, selected_points.shape[1]))
             if x_features:
-                x_mock[np.array(x_features), :] = selected_points[:len(x_features)]
+                x_mock[np.array(x_features), :] = selected_points[: len(x_features)]
             u_mock = np.zeros((4, selected_points.shape[1]))
             if u_features:
-                u_mock[np.array(u_features), :] = selected_points[len(x_features):]
+                u_mock[np.array(u_features), :] = selected_points[len(x_features) :]
             out = dense_gp.predict(x_mock, u_mock)
             out["pred"] = np.atleast_2d(out["pred"])
             y_train = np.squeeze(out["pred"][np.where(dense_gp.dim_idx == reg_y_dim)])
@@ -267,7 +368,9 @@ def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
 
             missing_pts = n_train_points - n_used_points
 
-            training_points = sample_random_points(cluster_x_points, training_points, missing_pts, dense_gp)
+            training_points = sample_random_points(
+                cluster_x_points, training_points, missing_pts, dense_gp
+            )
             if dense_gp is None:
                 # Transform from cluster data index to full dataset index
                 x_train = cluster_x_points[training_points]
@@ -278,14 +381,23 @@ def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
                 training_points = training_points.astype(int)
                 x_mock = np.zeros((13, len(training_points)))
                 if x_features:
-                    x_mock[np.array(x_features), :] = cluster_x_points[training_points, :len(x_features)].T
+                    x_mock[np.array(x_features), :] = cluster_x_points[
+                        training_points, : len(x_features)
+                    ].T
                 u_mock = np.zeros((4, len(training_points)))
                 if u_features:
-                    u_mock[np.array(u_features), :] = cluster_u_points[len(x_features):]
+                    u_mock[np.array(u_features), :] = cluster_u_points[
+                        len(x_features) :
+                    ]
                 out = dense_gp.predict(x_mock, u_mock)
-                y_additional = np.squeeze(out["pred"][np.where(dense_gp.dim_idx == reg_y_dim)])
+                y_additional = np.squeeze(
+                    out["pred"][np.where(dense_gp.dim_idx == reg_y_dim)]
+                )
                 y_train = np.append(y_train, y_additional)
-                x_train = np.concatenate((x_train, cluster_x_points[training_points, :len(x_features)]), axis=0)
+                x_train = np.concatenate(
+                    (x_train, cluster_x_points[training_points, : len(x_features)]),
+                    axis=0,
+                )
 
         # #### GP TRAINING #### #
         # Multidimensional input GP regressors
@@ -296,22 +408,43 @@ def main(x_features, u_features, reg_y_dim, quad_sim_options, dataset_name,
         gp_params["y_mean"] = cluster_y_mean
 
         # Train one independent GP for each output dimension
-        exponential_kernel = npKernelFunctions('squared_exponential', params={'l': l_scale, 'sigma_f': sigma_f})
+        exponential_kernel = npKernelFunctions(
+            "squared_exponential", params={"l": l_scale, "sigma_f": sigma_f}
+        )
         gp_regressors.append(npGPRegression(kernel=exponential_kernel, **gp_params))
-        gp_regressors[cluster] = gp_train_and_save([x_train], [y_train], [gp_regressors[cluster]], True, save_file_name,
-                                                   save_file_path, [reg_y_dim], cluster, progress_bar=False)[0]
+        gp_regressors[cluster] = gp_train_and_save(
+            [x_train],
+            [y_train],
+            [gp_regressors[cluster]],
+            True,
+            save_file_name,
+            save_file_path,
+            [reg_y_dim],
+            cluster,
+            progress_bar=False,
+        )[0]
 
     if visualize_model:
         gp_ensemble = GPEnsemble()
         gp_ensemble.add_model(gp_regressors)
         x_features = x_features
-        gp_visualization_experiment(quad_sim_options, gp_dataset,
-                                    x_cap, hist_bins, hist_thresh,
-                                    x_features, u_features, reg_y_dim,
-                                    grid_sampling_viz=True, pre_set_gp=gp_ensemble)
+        gp_visualization_experiment(
+            quad_sim_options,
+            gp_dataset,
+            x_cap,
+            hist_bins,
+            hist_thresh,
+            x_features,
+            u_features,
+            reg_y_dim,
+            grid_sampling_viz=True,
+            pre_set_gp=gp_ensemble,
+        )
 
 
-def gp_evaluate_test_set(gp_regressors, gp_dataset, pruned=False, timed=False, progress_bar=False):
+def gp_evaluate_test_set(
+    gp_regressors, gp_dataset, pruned=False, timed=False, progress_bar=False
+):
     """
     Runs GP prediction on a specified dataset.
 
@@ -333,7 +466,9 @@ def gp_evaluate_test_set(gp_regressors, gp_dataset, pruned=False, timed=False, p
     dt_test = gp_dataset.get_dt(pruned=pruned)
 
     tic = time.time()
-    out = gp_regressors.predict(x_test.T, u_test.T, return_std=True, progress_bar=progress_bar)
+    out = gp_regressors.predict(
+        x_test.T, u_test.T, return_std=True, progress_bar=progress_bar
+    )
     mean_post = out["pred"]
     std_post = out["cov_or_std"]
     elapsed = time.time() - tic
@@ -348,23 +483,37 @@ def gp_evaluate_test_set(gp_regressors, gp_dataset, pruned=False, timed=False, p
         return mean_post, std_post, elapsed
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--n_points", type=int, default="20",
-                        help="Number of training points used to fit the current GP model.")
+    parser.add_argument(
+        "--n_points",
+        type=int,
+        default="20",
+        help="Number of training points used to fit the current GP model.",
+    )
 
-    parser.add_argument("--model_name", type=str, default="",
-                        help="Name assigned to the trained model.")
+    parser.add_argument(
+        "--model_name", type=str, default="", help="Name assigned to the trained model."
+    )
 
-    parser.add_argument('--x', nargs='+', type=int, default=[7],
-                        help='Regression X variables. Must be a list of integers between 0 and 12. Velocities xyz '
-                             'correspond to indices 7, 8, 9.')
+    parser.add_argument(
+        "--x",
+        nargs="+",
+        type=int,
+        default=[7],
+        help="Regression X variables. Must be a list of integers between 0 and 12. Velocities xyz "
+        "correspond to indices 7, 8, 9.",
+    )
 
-    parser.add_argument("--y", type=int, default=7,
-                        help="Regression Y variable. Must be an integer between 0 and 12. Velocities xyz correspond to"
-                             "indices 7, 8, 9.")
+    parser.add_argument(
+        "--y",
+        type=int,
+        default=7,
+        help="Regression Y variable. Must be an integer between 0 and 12. Velocities xyz correspond to"
+        "indices 7, 8, 9.",
+    )
 
     input_arguments = parser.parse_args()
 
@@ -389,10 +538,23 @@ if __name__ == '__main__':
     dense_n_points = Conf.dense_training_points
     with_dense = Conf.use_dense_model
 
-    main(x_feats, u_feats, y_regressed_dim, simulation_options, ds_name,
-         x_value_cap, histogram_pruning_bins, histogram_pruning_threshold,
-         model_name=gp_name, n_train_points=n_train_pts,
-         n_clusters=Conf.clusters, load_clusters=Conf.load_clusters,
-         use_dense=with_dense,
-         dense_gp_points=dense_n_points, dense_gp_name=gp_dense_name, dense_gp_version=gp_id_custom,
-         visualize_data=Conf.visualize_data, visualize_model=Conf.visualize_training_result)
+    main(
+        x_feats,
+        u_feats,
+        y_regressed_dim,
+        simulation_options,
+        ds_name,
+        x_value_cap,
+        histogram_pruning_bins,
+        histogram_pruning_threshold,
+        model_name=gp_name,
+        n_train_points=n_train_pts,
+        n_clusters=Conf.clusters,
+        load_clusters=Conf.load_clusters,
+        use_dense=with_dense,
+        dense_gp_points=dense_n_points,
+        dense_gp_name=gp_dense_name,
+        dense_gp_version=gp_id_custom,
+        visualize_data=Conf.visualize_data,
+        visualize_model=Conf.visualize_training_result,
+    )

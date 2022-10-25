@@ -11,26 +11,43 @@ You should have received a copy of the GNU General Public License along with
 this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
-import time
 import argparse
-import numpy as np
+import time
 
+import numpy as np
 from config.configuration_parameters import SimpleSimConfig
-from src.quad_mpc.quad_3d_mpc import Quad3DMPC
-from src.quad_mpc.quad_3d import Quadrotor3D
-from src.utils.quad_3d_opt_utils import get_reference_chunk
-from src.utils.utils import load_pickled_models, interpol_mse, separate_variables
-from src.utils.visualization import initialize_drone_plotter, draw_drone_simulation, trajectory_tracking_results, \
-    get_experiment_files
-from src.utils.visualization import mse_tracking_experiment_plot
-from src.utils.trajectories import random_trajectory, lemniscate_trajectory, loop_trajectory
 from src.model_fitting.rdrv_fitting import load_rdrv
+from src.quad_mpc.quad_3d import Quadrotor3D
+from src.quad_mpc.quad_3d_mpc import Quad3DMPC
+from src.utils.quad_3d_opt_utils import get_reference_chunk
+from src.utils.trajectories import (
+    lemniscate_trajectory,
+    loop_trajectory,
+    random_trajectory,
+)
+from src.utils.utils import interpol_mse, load_pickled_models, separate_variables
+from src.utils.visualization import (
+    draw_drone_simulation,
+    get_experiment_files,
+    initialize_drone_plotter,
+    mse_tracking_experiment_plot,
+    trajectory_tracking_results,
+)
 
 global model_num
 
 
-def prepare_quadrotor_mpc(simulation_options, version=None, name=None, reg_type="gp", quad_name=None,
-                          t_horizon=1.0, q_diagonal=None, r_diagonal=None, q_mask=None):
+def prepare_quadrotor_mpc(
+    simulation_options,
+    version=None,
+    name=None,
+    reg_type="gp",
+    quad_name=None,
+    t_horizon=1.0,
+    q_diagonal=None,
+    r_diagonal=None,
+    q_mask=None,
+):
     """
     Creates a Quad3DMPC for the custom simulator.
     @param simulation_options: Parameters for the Quadrotor3D object.
@@ -49,7 +66,9 @@ def prepare_quadrotor_mpc(simulation_options, version=None, name=None, reg_type=
 
     # Default Q and R matrix for LQR cost
     if q_diagonal is None:
-        q_diagonal = np.array([10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05])
+        q_diagonal = np.array(
+            [10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+        )
     if r_diagonal is None:
         r_diagonal = np.array([0.1, 0.1, 0.1, 0.1])
     if q_mask is None:
@@ -85,13 +104,23 @@ def prepare_quadrotor_mpc(simulation_options, version=None, name=None, reg_type=
         pre_trained_models = rdrv_d = None
 
     if quad_name is None:
-        quad_name = "my_quad_" + str(globals()['model_num'])
-        globals()['model_num'] += 1
+        quad_name = "my_quad_" + str(globals()["model_num"])
+        globals()["model_num"] += 1
 
     # Initialize quad MPC
-    quad_mpc = Quad3DMPC(my_quad, t_horizon=t_horizon, optimization_dt=node_dt, simulation_dt=simulation_dt,
-                         q_cost=q_diagonal, r_cost=r_diagonal, n_nodes=n_mpc_nodes,
-                         pre_trained_models=pre_trained_models, model_name=quad_name, q_mask=q_mask, rdrv_d_mat=rdrv_d)
+    quad_mpc = Quad3DMPC(
+        my_quad,
+        t_horizon=t_horizon,
+        optimization_dt=node_dt,
+        simulation_dt=simulation_dt,
+        q_cost=q_diagonal,
+        r_cost=r_diagonal,
+        n_nodes=n_mpc_nodes,
+        pre_trained_models=pre_trained_models,
+        model_name=quad_name,
+        q_mask=q_mask,
+        rdrv_d_mat=rdrv_d,
+    )
 
     return quad_mpc
 
@@ -120,17 +149,40 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
     if reference_type == "loop":
         # Circular trajectory
         reference_traj, reference_timestamps, reference_u = loop_trajectory(
-            quad=my_quad, discretization_dt=mpc_period, radius=5, z=1, lin_acc=av_speed * 0.25, clockwise=True,
-            yawing=False, v_max=av_speed, map_name=None, plot=plot)
+            quad=my_quad,
+            discretization_dt=mpc_period,
+            radius=5,
+            z=1,
+            lin_acc=av_speed * 0.25,
+            clockwise=True,
+            yawing=False,
+            v_max=av_speed,
+            map_name=None,
+            plot=plot,
+        )
     elif reference_type == "lemniscate":
         # Lemniscate trajectory
         reference_traj, reference_timestamps, reference_u = lemniscate_trajectory(
-            quad=my_quad, discretization_dt=mpc_period, radius=5, z=1, lin_acc=av_speed * 0.25, clockwise=True,
-            yawing=False, v_max=av_speed, map_name=None, plot=plot)
+            quad=my_quad,
+            discretization_dt=mpc_period,
+            radius=5,
+            z=1,
+            lin_acc=av_speed * 0.25,
+            clockwise=True,
+            yawing=False,
+            v_max=av_speed,
+            map_name=None,
+            plot=plot,
+        )
     else:
         # Get a random smooth position trajectory
         reference_traj, reference_timestamps, reference_u = random_trajectory(
-            quad=my_quad, discretization_dt=mpc_period, seed=reference_type["random"], speed=av_speed, plot=plot)
+            quad=my_quad,
+            discretization_dt=mpc_period,
+            seed=reference_type["random"],
+            speed=av_speed,
+            plot=plot,
+        )
 
     # Set quad initial state equal to the initial reference trajectory state
     quad_current_state = reference_traj[0, :].tolist()
@@ -140,8 +192,12 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
     if plot:
         # Initialize real time plot stuff
         world_radius = np.max(np.abs(reference_traj[:, :2])) * 1.2
-        real_time_artists = initialize_drone_plotter(n_props=n_mpc_nodes, quad_rad=my_quad.length,
-                                                     world_rad=world_radius, full_traj=reference_traj)
+        real_time_artists = initialize_drone_plotter(
+            n_props=n_mpc_nodes,
+            quad_rad=my_quad.length,
+            world_rad=world_radius,
+            full_traj=reference_traj,
+        )
 
     start_time = time.time()
     max_simulation_time = 10000
@@ -159,7 +215,9 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
     # Measure total simulation time
     total_sim_time = 0.0
 
-    while (time.time() - start_time) < max_simulation_time and current_idx < reference_traj.shape[0]:
+    while (
+        time.time() - start_time
+    ) < max_simulation_time and current_idx < reference_traj.shape[0]:
 
         quad_current_state = my_quad.get_state(quaternion=True, stacked=True)
 
@@ -169,9 +227,16 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
         # ##### Optimization runtime (outer loop) ##### #
         # Get the chunk of trajectory required for the current optimization
         ref_traj_chunk, ref_u_chunk = get_reference_chunk(
-            reference_traj, reference_u, current_idx, n_mpc_nodes, reference_over_sampling)
+            reference_traj,
+            reference_u,
+            current_idx,
+            n_mpc_nodes,
+            reference_over_sampling,
+        )
 
-        model_ind = quad_mpc.set_reference(x_reference=separate_variables(ref_traj_chunk), u_reference=ref_u_chunk)
+        model_ind = quad_mpc.set_reference(
+            x_reference=separate_variables(ref_traj_chunk), u_reference=ref_u_chunk
+        )
 
         # Optimize control input to reach pre-set target
         t_opt_init = time.time()
@@ -182,8 +247,15 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
         ref_u = np.squeeze(np.array(w_opt[:4]))
 
         if len(quad_trajectory) > 0 and plot and current_idx > 0:
-            draw_drone_simulation(real_time_artists, quad_trajectory[:current_idx, :], my_quad, targets=None,
-                                  targets_reached=None, pred_traj=x_pred, x_pred_cov=None)
+            draw_drone_simulation(
+                real_time_artists,
+                quad_trajectory[:current_idx, :],
+                my_quad,
+                targets=None,
+                targets_reached=None,
+                pred_traj=x_pred,
+                x_pred_cov=None,
+            )
 
         simulation_time = 1e-8
 
@@ -204,54 +276,84 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
     # Average elapsed time per optimization
     mean_opt_time /= current_idx
 
-    rmse = interpol_mse(reference_timestamps, reference_traj[:, :3], reference_timestamps, quad_trajectory[:, :3])
+    rmse = interpol_mse(
+        reference_timestamps,
+        reference_traj[:, :3],
+        reference_timestamps,
+        quad_trajectory[:, :3],
+    )
     max_vel = np.max(np.sqrt(np.sum(reference_traj[:, 7:10] ** 2, 1)))
 
-    with_gp = ' + GP ' if quad_mpc.gp_ensemble is not None else ' - GP '
-    title = r'$v_{max}$=%.2f m/s | RMSE: %.4f m | %s ' % (max_vel, float(rmse), with_gp)
+    with_gp = " + GP " if quad_mpc.gp_ensemble is not None else " - GP "
+    title = r"$v_{max}$=%.2f m/s | RMSE: %.4f m | %s " % (max_vel, float(rmse), with_gp)
 
     if plot:
-        trajectory_tracking_results(reference_timestamps, reference_traj, quad_trajectory,
-                                    reference_u, u_optimized_seq, title)
+        trajectory_tracking_results(
+            reference_timestamps,
+            reference_traj,
+            quad_trajectory,
+            reference_u,
+            u_optimized_seq,
+            title,
+        )
 
     return rmse, max_vel, mean_opt_time
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--model_version", type=str, default="", nargs="+",
-                        help="Versions to load for the regression models. By default it is an 8 digit git hash."
-                             "Must specify the version for each model separated by spaces.")
+    parser.add_argument(
+        "--model_version",
+        type=str,
+        default="",
+        nargs="+",
+        help="Versions to load for the regression models. By default it is an 8 digit git hash."
+        "Must specify the version for each model separated by spaces.",
+    )
 
-    parser.add_argument("--model_name", type=str, default="", nargs="+",
-                        help="Name of the regression models within the specified <model_version> folders. "
-                             "Must specify the names for all models separated by spaces.")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="",
+        nargs="+",
+        help="Name of the regression models within the specified <model_version> folders. "
+        "Must specify the names for all models separated by spaces.",
+    )
 
-    parser.add_argument("--model_type", type=str, default="", nargs="+",
-                        help="Type of regression models (GP or RDRv linear). "
-                             "Must be specified for all models separated by spaces.")
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="",
+        nargs="+",
+        help="Type of regression models (GP or RDRv linear). "
+        "Must be specified for all models separated by spaces.",
+    )
 
-    parser.add_argument("--fast", dest="fast", action="store_true",
-                        help="Set to True to run a fast experiment with less velocity samples.")
+    parser.add_argument(
+        "--fast",
+        dest="fast",
+        action="store_true",
+        help="Set to True to run a fast experiment with less velocity samples.",
+    )
     parser.set_defaults(fast=False)
 
     input_arguments = parser.parse_args()
 
-    globals()['model_num'] = 0
+    globals()["model_num"] = 0
 
     # Trajectory options
     traj_type_vec = [{"random": 1}, "loop", "lemniscate"]
     traj_type_labels = ["Random", "Circle", "Lemniscate"]
     if input_arguments.fast:
-        av_speed_vec = [[2.0, 3.5],
-                        [2.0, 12.0],
-                        [2.0, 12.0]]
+        av_speed_vec = [[2.0, 3.5], [2.0, 12.0], [2.0, 12.0]]
     else:
-        av_speed_vec = [[2.0, 2.7, 3.0, 3.2, 3.5],
-                        [2.0, 4.5, 7.0, 9.5, 12.0],
-                        [2.0, 4.5, 7.0, 9.5, 12.0]]
+        av_speed_vec = [
+            [2.0, 2.7, 3.0, 3.2, 3.5],
+            [2.0, 4.5, 7.0, 9.5, 12.0],
+            [2.0, 4.5, 7.0, 9.5, 12.0],
+        ]
 
     # Model options
     git_list = input_arguments.model_version
@@ -263,15 +365,25 @@ if __name__ == '__main__':
     # Simulation options
     plot_sim = SimpleSimConfig.custom_sim_gui
     noisy_sim_options = SimpleSimConfig.simulation_disturbances
-    perfect_sim_options = {"payload": False, "drag": False, "noisy": False, "motor_noise": False}
+    perfect_sim_options = {
+        "payload": False,
+        "drag": False,
+        "noisy": False,
+        "motor_noise": False,
+    }
     model_vec = [
         {"simulation_options": perfect_sim_options, "model": None},
-        {"simulation_options": noisy_sim_options, "model": None}]
+        {"simulation_options": noisy_sim_options, "model": None},
+    ]
 
-    legends = ['perfect', 'nominal']
+    legends = ["perfect", "nominal"]
     for git, m_name, gp_or_rdrv in zip(git_list, name_list, type_list):
-        model_vec += [{"simulation_options": noisy_sim_options,
-                       "model": {"version": git, "name": m_name, "reg_type": gp_or_rdrv}}]
+        model_vec += [
+            {
+                "simulation_options": noisy_sim_options,
+                "model": {"version": git, "name": m_name, "reg_type": gp_or_rdrv},
+            }
+        ]
         legends += [gp_or_rdrv + ": " + m_name]
 
     y_label = "RMSE [m]"
@@ -284,7 +396,9 @@ if __name__ == '__main__':
     for n_train_id, model_type in enumerate(model_vec):
 
         if model_type["model"] is not None:
-            custom_mpc = prepare_quadrotor_mpc(model_type["simulation_options"], **model_type["model"])
+            custom_mpc = prepare_quadrotor_mpc(
+                model_type["simulation_options"], **model_type["model"]
+            )
         else:
             custom_mpc = prepare_quadrotor_mpc(model_type["simulation_options"])
 
@@ -292,9 +406,15 @@ if __name__ == '__main__':
 
             for v_id, speed in enumerate(av_speed_vec[traj_id]):
 
-                traj_params = {"av_speed": speed, "reference_type": traj_type, "plot": plot_sim}
+                traj_params = {
+                    "av_speed": speed,
+                    "reference_type": traj_type,
+                    "plot": plot_sim,
+                }
 
-                mse[traj_id, v_id, n_train_id], traj_v, opt_dt = main(custom_mpc, **traj_params)
+                mse[traj_id, v_id, n_train_id], traj_v, opt_dt = main(
+                    custom_mpc, **traj_params
+                )
                 t_opt[traj_id, v_id, n_train_id] += opt_dt
 
                 if v_max[traj_id, v_id] == 0:
@@ -308,4 +428,13 @@ if __name__ == '__main__':
     # from src.utils.visualization import load_past_experiments
     # _, mse, v_max, t_opt = load_past_experiments()
 
-    mse_tracking_experiment_plot(v_max, mse, traj_type_labels, model_vec, legends, [y_label], t_opt=t_opt, font_size=26)
+    mse_tracking_experiment_plot(
+        v_max,
+        mse,
+        traj_type_labels,
+        model_vec,
+        legends,
+        [y_label],
+        t_opt=t_opt,
+        font_size=26,
+    )
