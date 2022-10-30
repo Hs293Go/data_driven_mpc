@@ -309,14 +309,6 @@ def main(
     length_scale = 0.1
     sigma_n = 0.01
 
-    gp_params = {
-        "x_features": x_features,
-        "u_features": u_features,
-        "reg_dim": reg_y_dim,
-        "sigma_n": sigma_n,
-        "n_restarts": n_restarts,
-    }
-
     # Get all cluster centroids for the current output dimension
     centroids = gp_dataset.centroids
     print("Training {} cluster model(s)".format(n_clusters))
@@ -404,14 +396,23 @@ def main(
         l_scale = length_scale * np.ones((x_train.shape[1], 1))
 
         cluster_mean = centroids[cluster]
-        gp_params["mean"] = cluster_mean
-        gp_params["y_mean"] = cluster_y_mean
 
         # Train one independent GP for each output dimension
         exponential_kernel = npKernelFunctions(
             "squared_exponential", params={"l": l_scale, "sigma_f": sigma_f}
         )
-        gp_regressors.append(npGPRegression(kernel=exponential_kernel, **gp_params))
+        gp_regressors.append(
+            npGPRegression(
+                x_features,
+                u_features,
+                reg_y_dim,
+                mean=cluster_mean,
+                y_mean=cluster_y_mean,
+                kernel=exponential_kernel,
+                sigma_n=sigma_n,
+                n_restarts=n_restarts,
+            )
+        )
         gp_regressors[cluster] = gp_train_and_save(
             [x_train],
             [y_train],
