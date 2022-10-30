@@ -139,7 +139,7 @@ def gp_visualization_experiment(
             t_vec, augmented_diff[:, i] + 3 * std_estimate[:, i], ":c", label="3 std"
         )
         if nominal_diff is not None:
-            plt.plot(t_vec, nominal_diff[:, i], "r", label="nominal_err")
+            plt.plot(t_vec, nominal_diff[:, i], "r", alpha=0.25, label="nominal_err")
             plt.title(
                 "Mean dt: %.2f s. Nominal RMSE: %.5f [m/s].  Augmented rmse: %.5f [m/s]"
                 % (float(np.mean(dt_test)), nominal_rmse[i], augmented_rmse[i])
