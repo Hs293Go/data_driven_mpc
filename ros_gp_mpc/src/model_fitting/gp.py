@@ -385,7 +385,7 @@ class CustomGPRegression:
         ]
 
         if self.n_restarts > 1:
-            random_state = mtrand._rand
+            random_state = np.random.default_rng(1919)
             for iteration in range(self.n_restarts - 1):
                 theta_initial = random_state.uniform(log_bounds[:, 0], log_bounds[:, 1])
                 optima.append(
