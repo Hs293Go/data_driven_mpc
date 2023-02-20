@@ -55,7 +55,7 @@ def draw_arrow(x_base, y_base, x_body, y_body):
     :return: a tuple of x, y coordinates to plot the arrow
     """
 
-    len_arrow = np.sqrt(x_body ** 2 + y_body ** 2)
+    len_arrow = np.sqrt(x_body**2 + y_body**2)
     beta = np.arctan2(y_body, x_body)
     beta_rot = angle_to_rot_mat(beta)
     lower_arrow = beta_rot.dot(
@@ -150,7 +150,7 @@ def visualize_data_distribution(x_data, y_data, clusters, x_pruned, y_pruned):
 
     fig = plt.figure()
     ax = fig.add_subplot(131, projection="3d")
-    c = np.sqrt(np.sum(y_data ** 2, 1))
+    c = np.sqrt(np.sum(y_data**2, 1))
     scatter = ax.scatter(x_data[:, 0], x_data[:, 1], x_data[:, 2], c=c, alpha=0.6)
     ax.set_title("Raw data: Correction magnitude")
     ax.set_xlabel(r"$v_x\: [m/s]$")
@@ -159,7 +159,7 @@ def visualize_data_distribution(x_data, y_data, clusters, x_pruned, y_pruned):
     fig.colorbar(scatter, ax=ax, orientation="vertical", shrink=0.75)
 
     ax = fig.add_subplot(132, projection="3d")
-    c = np.sqrt(np.sum(y_pruned ** 2, 1))
+    c = np.sqrt(np.sum(y_pruned**2, 1))
     scatter = ax.scatter(x_pruned[:, 0], x_pruned[:, 1], x_pruned[:, 2], c=c, alpha=0.6)
     ax.set_title("Pruned data: Correction magnitude")
     ax.set_xlabel(r"$v_x\: [m/s]$")
@@ -195,8 +195,8 @@ def visualize_gp_inference(
     predictions = np.atleast_2d(np.atleast_2d(predictions["pred"])[y_dims])
 
     if len(vis_features_x) > 1:
-        y_pred = np.sqrt(np.sum(predictions ** 2, 0))
-        y_mse = np.sqrt(np.sum(y_data ** 2, 1))
+        y_pred = np.sqrt(np.sum(predictions**2, 0))
+        y_mse = np.sqrt(np.sum(y_data**2, 1))
     else:
         y_pred = predictions[0, :]
         y_mse = y_data[:, 0]
@@ -321,7 +321,7 @@ def visualize_gp_inference(
     outs = gp_ensemble.predict(x_mock.T, u_mock.T, return_gp_id=True, progress_bar=True)
     y_pred = np.atleast_2d(np.atleast_2d(outs["pred"])[y_dims])
     gp_ids = outs["gp_id"]
-    y_sample = np.sqrt(np.sum(y_pred ** 2, 0))
+    y_sample = np.sqrt(np.sum(y_pred**2, 0))
     y_sample = np.reshape(y_sample, x_mesh.shape)
 
     gp_ids = np.reshape(gp_ids[next(iter(gp_ids))], x_mesh.shape)
@@ -406,6 +406,8 @@ def trajectory_tracking_results(
 
     with_ref = True if x_ref is not None else False
 
+    fig3d, ax3d = plt.subplots(subplot_kw=dict(projection="3d"))
+
     fig, ax = plt.subplots(3, 4, sharex="all", figsize=(7, 9))
 
     SMALL_SIZE = 8
@@ -419,6 +421,14 @@ def trajectory_tracking_results(
     plt.rc("ytick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
     plt.rc("legend", fontsize=SMALL_SIZE)  # legend fontsize
     plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
+    ax3d.plot(x_executed[:, 0], x_executed[:, 1], x_executed[:, 2], label="Actual")
+    ax3d.plot(x_ref[:, 0], x_ref[:, 1], x_ref[:, 2], label="Reference")
+    ax3d.set_xlabel("X (m)")
+    ax3d.set_ylabel("Y (m)")
+    ax3d.set_zlabel("Z (m)")
+
+    ax3d.set_zlim(0, np.mean(x_ref[:, 2]) * 1.5)
 
     labels = ["x", "y", "z"]
     for i in range(3):
