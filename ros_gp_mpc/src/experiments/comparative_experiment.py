@@ -39,9 +39,6 @@ global model_num
 
 def prepare_quadrotor_mpc(
     simulation_options,
-    version=None,
-    name=None,
-    reg_type="gp",
     quad_name=None,
     t_horizon=1.0,
     q_diagonal=None,
@@ -86,23 +83,6 @@ def prepare_quadrotor_mpc(
     # Quadrotor simulator
     my_quad = Quadrotor3D(**simulation_options)
 
-    if version is not None and name is not None:
-
-        load_ops = {"params": simulation_options}
-        load_ops.update({"git": version, "model_name": name})
-
-        # Load trained GP model
-        if reg_type == "gp":
-            pre_trained_models = load_pickled_models(model_options=load_ops)
-            rdrv_d = None
-
-        else:
-            rdrv_d = load_rdrv(model_options=load_ops)
-            pre_trained_models = None
-
-    else:
-        pre_trained_models = rdrv_d = None
-
     if quad_name is None:
         quad_name = "my_quad_" + str(globals()["model_num"])
         globals()["model_num"] += 1
@@ -116,10 +96,8 @@ def prepare_quadrotor_mpc(
         q_cost=q_diagonal,
         r_cost=r_diagonal,
         n_nodes=n_mpc_nodes,
-        pre_trained_models=pre_trained_models,
         model_name=quad_name,
         q_mask=q_mask,
-        rdrv_d_mat=rdrv_d,
     )
 
     return quad_mpc

@@ -29,11 +29,9 @@ class Quad3DMPC:
         r_cost=None,
         optimization_dt=5e-2,
         simulation_dt=5e-4,
-        pre_trained_models=None,
         model_name="my_quad",
         q_mask=None,
         solver_options=None,
-        rdrv_d_mat=None,
     ):
         """
         :param my_quad: Quadrotor3D simulator object
@@ -52,14 +50,6 @@ class Quad3DMPC:
         if not used
         """
 
-        if rdrv_d_mat is not None:
-            # rdrv is currently not compatible with covariance mode or with GP-MPC.
-            print("RDRv mode")
-            self.rdrv = rdrv_d_mat
-            assert pre_trained_models is None
-        else:
-            self.rdrv = None
-
         self.quad = my_quad
         self.simulation_dt = simulation_dt
         self.optimization_dt = optimization_dt
@@ -70,18 +60,6 @@ class Quad3DMPC:
         self.n_nodes = n_nodes
         self.t_horizon = t_horizon
 
-        # Load augmented dynamics model with GP regressor
-        if pre_trained_models is not None:
-            self.gp_ensemble = restore_gp_regressors(pre_trained_models)
-            x_dims = len(my_quad.get_state(quaternion=True, stacked=True))
-            self.B_x = {}
-            for y_dim in self.gp_ensemble.gp.keys():
-                self.B_x[y_dim] = make_bx_matrix(x_dims, [y_dim])
-
-        else:
-            self.gp_ensemble = None
-            self.B_x = {}  # Selection matrix of the GP regressor-modified system states
-
         # For MPC optimization use
         self.quad_opt = Quad3DOptimizer(
             my_quad,
@@ -89,12 +67,9 @@ class Quad3DMPC:
             n_nodes=n_nodes,
             q_cost=q_cost,
             r_cost=r_cost,
-            B_x=self.B_x,
-            gp_regressors=self.gp_ensemble,
             model_name=model_name,
             q_mask=q_mask,
             solver_options=solver_options,
-            rdrv_d_mat=rdrv_d_mat,
         )
 
     def clear(self):
@@ -125,10 +100,9 @@ class Quad3DMPC:
             # Target state is a sequence
             return self.quad_opt.set_reference_trajectory(x_reference, u_reference)
 
-    def optimize(self, use_model=0, return_x=False):
+    def optimize(self, return_x=False):
         """
         Runs MPC optimization to reach the pre-set target.
-        :param use_model: Integer. Select which dynamics model to use from the available options.
         :param return_x: bool, whether to also return the optimized sequence of states alongside with the controls.
 
         :return: 4*m vector of optimized control inputs with the format: [u_1(0), u_2(0), u_3(0), u_4(0), u_1(1), ...,
@@ -137,14 +111,11 @@ class Quad3DMPC:
         """
 
         quad_current_state = self.quad.get_state(quaternion=True, stacked=True)
-        quad_gp_state = self.quad.get_gp_state(quaternion=True, stacked=True)
 
         # Remove rate state for simplified model NLP
         out_out = self.quad_opt.run_optimization(
             quad_current_state,
-            use_model=use_model,
             return_x=return_x,
-            gp_regression_state=quad_gp_state,
         )
         return out_out
 
@@ -186,7 +157,7 @@ class Quad3DMPC:
         )
 
     def forward_prop(
-        self, x_0, w_opt, cov_0=None, t_horizon=None, dt=None, use_gp=False, use_model=0
+        self, x_0, w_opt, cov_0=None, t_horizon=None, dt=None, use_gp=False
     ):
         """
         Computes the forward propagation of the state using an MPC-optimized control input sequence.
@@ -200,7 +171,6 @@ class Quad3DMPC:
         :param dt: Optional. Vector of length m, with the corresponding integration time for every control input in
         w_opt. If none is provided, the default integration step is used.
         :param use_gp: Boolean, whether to use GP regressors when performing the integration or not.
-        :param use_model: Integer. Select which dynamics model to use from the available options.
         :return: An m x n array of propagated (expected) state estimates, and an m x n x n array with the m propagated
         covariance matrices.
         """
@@ -216,7 +186,7 @@ class Quad3DMPC:
         elif len(cov_0.shape) == 1:
             cov_0 = np.diag(cov_0)
         elif len(cov_0.shape) > 2:
-            TypeError(
+            raise TypeError(
                 "The initial covariance value must be either a 1D vector of a 2D matrix"
             )
 
@@ -233,7 +203,6 @@ class Quad3DMPC:
             dynamics_jac_f=self.quad_opt.quad_xdot_jac,
             B_x=self.B_x,
             gp_regressors=gp_ensemble,
-            use_model=use_model,
         )
 
     @staticmethod

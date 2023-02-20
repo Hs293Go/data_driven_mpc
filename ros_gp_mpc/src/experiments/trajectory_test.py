@@ -36,9 +36,6 @@ from tqdm import tqdm
 
 def main(args):
     params = {
-        "version": args.model_version,
-        "name": args.model_name,
-        "reg_type": args.model_type,
         "quad_name": "my_quad",
     }
 
@@ -145,13 +142,16 @@ def main(args):
         )
 
         # Set the reference for the OCP
-        model_ind = quad_mpc.set_reference(
+        if not quad_mpc.set_reference(
             x_reference=separate_variables(ref_traj_chunk), u_reference=ref_u_chunk
-        )
+        ):
+            raise RuntimeError(
+                f"Failed to set reference on trajectory index {current_idx}"
+            )
 
         # Optimize control input to reach pre-set target
         t_opt_init = time.time()
-        w_opt, x_pred = quad_mpc.optimize(use_model=model_ind, return_x=True)
+        w_opt, x_pred = quad_mpc.optimize(return_x=True)
         mean_opt_time += time.time() - t_opt_init
 
         # Select first input (one for each motor) - MPC applies only first optimized input to the plant
@@ -192,7 +192,7 @@ def main(args):
     if tracking_results_plot:
         v_max = np.max(reference_traj[:, 7:10])
 
-        with_gp = " + GP " if quad_mpc.gp_ensemble is not None else " - GP "
+        with_gp = " - GP "
         title = r"$v_{max}$=%.2f m/s | RMSE: %.4f m | %s " % (
             v_max,
             float(tracking_rmse),
@@ -212,18 +212,7 @@ def main(args):
     print("\n:::::::::::::: SIMULATION SETUP ::::::::::::::\n")
     print("Simulation: Applied disturbances: ")
     print(json.dumps(simulation_options))
-    if quad_mpc.gp_ensemble is not None:
-        print(
-            "\nModel: Using GP regression model: ",
-            params["version"] + "/" + params["name"],
-        )
-    elif quad_mpc.rdrv is not None:
-        print(
-            "\nModel: Using RDRv regression model: ",
-            params["version"] + "/" + params["name"],
-        )
-    else:
-        print("\nModel: No regression model loaded")
+    print("\nModel: No regression model loaded")
 
     print(
         "\nReference: Executed trajectory",
@@ -241,28 +230,6 @@ def main(args):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--model_version",
-        type=str,
-        default="",
-        help="Version to load for the regression models. By default it is an 8 digit git hash.",
-    )
-
-    parser.add_argument(
-        "--model_name",
-        type=str,
-        default="",
-        help="Name of the regression model within the specified <model_version> folder.",
-    )
-
-    parser.add_argument(
-        "--model_type",
-        type=str,
-        default="gp",
-        choices=["gp", "rdrv"],
-        help="Type of regression model (GP or RDRv linear)",
-    )
 
     parser.add_argument(
         "--trajectory",
