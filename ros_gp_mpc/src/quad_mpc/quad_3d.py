@@ -282,52 +282,43 @@ class Quadrotor3D:
             f_d = np.zeros((3, 1))
             t_d = np.zeros((3, 1))
 
-        x = self.get_state(quaternion=True, stacked=False)
+        x = np.concatenate(self.get_state(quaternion=True, stacked=False))
 
         # RK4 integration
-        k1 = [
-            self.f_pos(x),
-            self.f_att(x),
-            self.f_vel(x, self.u, f_d),
-            self.f_rate(x, self.u, t_d),
-        ]
-        x_aux = [x[i] + dt / 2 * k1[i] for i in range(4)]
-        k2 = [
-            self.f_pos(x_aux),
-            self.f_att(x_aux),
-            self.f_vel(x_aux, self.u, f_d),
-            self.f_rate(x_aux, self.u, t_d),
-        ]
-        x_aux = [x[i] + dt / 2 * k2[i] for i in range(4)]
-        k3 = [
-            self.f_pos(x_aux),
-            self.f_att(x_aux),
-            self.f_vel(x_aux, self.u, f_d),
-            self.f_rate(x_aux, self.u, t_d),
-        ]
-        x_aux = [x[i] + dt * k3[i] for i in range(4)]
-        k4 = [
-            self.f_pos(x_aux),
-            self.f_att(x_aux),
-            self.f_vel(x_aux, self.u, f_d),
-            self.f_rate(x_aux, self.u, t_d),
-        ]
-        x = [
-            x[i]
-            + dt
-            * (
-                1.0 / 6.0 * k1[i]
-                + 2.0 / 6.0 * k2[i]
-                + 2.0 / 6.0 * k3[i]
-                + 1.0 / 6.0 * k4[i]
-            )
-            for i in range(4)
-        ]
+        k1, k2, k3, k4 = (
+            np.empty((13,)),
+            np.empty((13,)),
+            np.empty((13,)),
+            np.empty((13,)),
+        )
+        k1[0:3] = self.f_pos(x)
+        k1[3:7] = self.f_att(x)
+        k1[7:10] = self.f_vel(x, self.u, f_d)
+        k1[10:13] = self.f_rate(x, self.u, t_d)
+        x_aux = x + dt / 2 * k1
+        k2[0:3] = self.f_pos(x_aux)
+        k2[3:7] = self.f_att(x_aux)
+        k2[7:10] = self.f_vel(x_aux, self.u, f_d)
+        k2[10:13] = self.f_rate(x_aux, self.u, t_d)
+        x_aux = x + dt / 2 * k2
+        k3[0:3] = self.f_pos(x_aux)
+        k3[3:7] = self.f_att(x_aux)
+        k3[7:10] = self.f_vel(x_aux, self.u, f_d)
+        k3[10:13] = self.f_rate(x_aux, self.u, t_d)
+        x_aux = x + dt * k3
+        k4[0:3] = self.f_pos(x_aux)
+        k4[3:7] = self.f_att(x_aux)
+        k4[7:10] = self.f_vel(x_aux, self.u, f_d)
+        k4[10:13] = self.f_rate(x_aux, self.u, t_d)
+        x = x + dt * (1.0 / 6.0 * k1 + 2.0 / 6.0 * k2 + 2.0 / 6.0 * k3 + 1.0 / 6.0 * k4)
 
         # Ensure unit quaternion
-        x[1] = unit_quat(x[1])
+        x[3:7] = unit_quat(x[3:7])
 
-        self.pos, self.angle, self.vel, self.a_rate = x
+        self.pos = x[0:3]
+        self.angle = x[3:7]
+        self.vel = x[7:10]
+        self.a_rate = x[10:13]
 
     def f_pos(self, x):
         """
@@ -336,7 +327,7 @@ class Quadrotor3D:
         :return: position differential increment (vector): d[pos_x; pos_y]/dt
         """
 
-        vel = x[2]
+        vel = x[7:10]
         return vel
 
     def f_att(self, x):
@@ -346,8 +337,8 @@ class Quadrotor3D:
         :return: attitude differential increment (quaternion qw, qx, qy, qz): da/dt
         """
 
-        rate = x[3]
-        angle_quaternion = x[1]
+        rate = x[10:13]
+        angle_quaternion = x[3:7]
 
         return 1 / 2 * skew_symmetric(rate).dot(angle_quaternion)
 
@@ -364,17 +355,17 @@ class Quadrotor3D:
 
         if self.drag:
             # Transform velocity to body frame
-            v_b = v_dot_q(x[2], quaternion_inverse(x[1]))[:, np.newaxis]
+            v_b = v_dot_q(x[7:10], quaternion_inverse(x[3:7]))[:, np.newaxis]
             # Compute aerodynamic drag acceleration in world frame
-            a_drag = -self.aero_drag * v_b ** 2 * np.sign(v_b) / self.mass
+            a_drag = -self.aero_drag * v_b**2 * np.sign(v_b) / self.mass
             # Add rotor drag
             a_drag -= self.rotor_drag * v_b / self.mass
             # Transform drag acceleration to world frame
-            a_drag = v_dot_q(a_drag, x[1])
+            a_drag = v_dot_q(a_drag, x[3:7])
         else:
             a_drag = np.zeros((3, 1))
 
-        angle_quaternion = x[1]
+        angle_quaternion = x[3:7]
 
         a_payload = -self.payload_mass * self.g / self.mass
 
@@ -394,7 +385,7 @@ class Quadrotor3D:
         :return: angular rate differential increment (scalar): dr/dt
         """
 
-        rate = x[3]
+        rate = x[10:13]
         return np.array(
             [
                 1
