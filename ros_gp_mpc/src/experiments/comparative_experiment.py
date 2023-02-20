@@ -16,7 +16,6 @@ import time
 
 import numpy as np
 from config.configuration_parameters import SimpleSimConfig
-from src.model_fitting.rdrv_fitting import load_rdrv
 from src.quad_mpc.quad_3d import Quadrotor3D
 from src.quad_mpc.quad_3d_mpc import Quad3DMPC
 from src.utils.quad_3d_opt_utils import get_reference_chunk
