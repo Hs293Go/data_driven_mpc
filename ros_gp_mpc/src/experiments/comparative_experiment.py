@@ -26,9 +26,7 @@ from src.utils.trajectories import (
 )
 from src.utils.utils import interpol_mse, load_pickled_models, separate_variables
 from src.utils.visualization import (
-    draw_drone_simulation,
     get_experiment_files,
-    initialize_drone_plotter,
     mse_tracking_experiment_plot,
     trajectory_tracking_results,
 )
@@ -165,17 +163,6 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
     quad_current_state = reference_traj[0, :].tolist()
     my_quad.set_state(quad_current_state)
 
-    real_time_artists = None
-    if plot:
-        # Initialize real time plot stuff
-        world_radius = np.max(np.abs(reference_traj[:, :2])) * 1.2
-        real_time_artists = initialize_drone_plotter(
-            n_props=n_mpc_nodes,
-            quad_rad=my_quad.length,
-            world_rad=world_radius,
-            full_traj=reference_traj,
-        )
-
     start_time = time.time()
     max_simulation_time = 10000
 
@@ -222,17 +209,6 @@ def main(quad_mpc, av_speed, reference_type=None, plot=False):
 
         # Select first input (one for each motor) - MPC applies only first optimized input to the plant
         ref_u = np.squeeze(np.array(w_opt[:4]))
-
-        if len(quad_trajectory) > 0 and plot and current_idx > 0:
-            draw_drone_simulation(
-                real_time_artists,
-                quad_trajectory[:current_idx, :],
-                my_quad,
-                targets=None,
-                targets_reached=None,
-                pred_traj=x_pred,
-                x_pred_cov=None,
-            )
 
         simulation_time = 1e-8
 

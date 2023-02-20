@@ -27,8 +27,6 @@ from src.utils.trajectories import (
 )
 from src.utils.utils import separate_variables
 from src.utils.visualization import (
-    draw_drone_simulation,
-    initialize_drone_plotter,
     trajectory_tracking_results,
 )
 from tqdm import tqdm
@@ -44,7 +42,6 @@ def main(args):
 
     debug_plots = SimpleSimConfig.pre_run_debug_plots
     tracking_results_plot = SimpleSimConfig.result_plots
-    sim_gui = SimpleSimConfig.custom_sim_gui
 
     quad_mpc = prepare_quadrotor_mpc(simulation_options, **params)
 
@@ -100,17 +97,6 @@ def main(args):
     quad_current_state = reference_traj[0, :].tolist()
     my_quad.set_state(quad_current_state)
 
-    real_time_artists = None
-    if sim_gui:
-        # Initialize real time plot stuff
-        world_radius = np.max(np.abs(reference_traj[:, :2])) * 1.2
-        real_time_artists = initialize_drone_plotter(
-            n_props=n_mpc_nodes,
-            quad_rad=my_quad.length,
-            world_rad=world_radius,
-            full_traj=reference_traj,
-        )
-
     ref_u = reference_u[0, :]
     quad_trajectory = np.zeros((len(reference_timestamps), len(quad_current_state)))
     u_optimized_seq = np.zeros((len(reference_timestamps), 4))
@@ -157,17 +143,6 @@ def main(args):
         # Select first input (one for each motor) - MPC applies only first optimized input to the plant
         ref_u = np.squeeze(np.array(w_opt[:4]))
         u_optimized_seq[current_idx, :] = np.reshape(ref_u, (1, -1))
-
-        if len(quad_trajectory) > 0 and sim_gui and current_idx > 0:
-            draw_drone_simulation(
-                real_time_artists,
-                quad_trajectory[:current_idx, :],
-                my_quad,
-                targets=None,
-                targets_reached=None,
-                pred_traj=x_pred,
-                x_pred_cov=None,
-            )
 
         simulation_time = 0.0
 
