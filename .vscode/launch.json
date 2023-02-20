@@ -5,6 +5,21 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Trajectory Test",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/ros_gp_mpc/src/experiments/trajectory_test.py",
+      "args": [
+        "--trajectory",
+        "lemniscate"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/ros_gp_mpc"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
       "name": "Simple Experiment",
       "type": "python",
       "request": "launch",
