@@ -36,7 +36,7 @@ from src.utils.utils import (
     load_pickled_models,
     quaternion_state_mse,
     separate_variables,
-    v_dot_q,
+    quaternion_rotate_point,
 )
 from src.utils.visualization import (
     get_experiment_files,
@@ -535,7 +535,7 @@ class GPMPCWrapper:
 
         # Change velocity to world frame if in gazebo environment
         if self.environment == "gazebo":
-            v_w = v_dot_q(np.array(v), np.array(q)).tolist()
+            v_w = quaternion_rotate_point(np.array(v), np.array(q)).tolist()
         else:
             v_w = v
 

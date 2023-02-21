@@ -60,13 +60,11 @@ def prepare_quadrotor_mpc(
 
     # Default Q and R matrix for LQR cost
     if q_diagonal is None:
-        q_diagonal = np.array(
-            [10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
-        )
+        q_diagonal = np.array([10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05])
     if r_diagonal is None:
         r_diagonal = np.array([0.1, 0.1, 0.1, 0.1])
     if q_mask is None:
-        q_mask = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]).T
+        q_mask = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1]).T
 
     # Simulation integration step (the smaller the more "continuous"-like simulation.
     simulation_dt = 5e-4

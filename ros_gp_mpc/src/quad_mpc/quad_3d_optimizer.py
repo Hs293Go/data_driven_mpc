@@ -26,7 +26,8 @@ from src.utils.utils import (
     quaternion_inverse,
     safe_mkdir_recursive,
     skew_symmetric,
-    v_dot_q,
+    quaternion_rotate_point,
+    quaternion_product,
 )
 
 
@@ -75,18 +76,16 @@ class Quad3DOptimizer:
         self.p = cs.MX.sym("p", 3)  # position
         self.q = cs.MX.sym("a", 4)  # angle quaternion (wxyz)
         self.v = cs.MX.sym("v", 3)  # velocity
-        self.r = cs.MX.sym("r", 3)  # angle rate
 
         # Full state vector (13-dimensional)
-        self.x = cs.vertcat(self.p, self.q, self.v, self.r)
-        self.state_dim = 13
+        self.x = cs.vertcat(self.p, self.q, self.v)
+        self.state_dim = 10
 
         # Control input vector
-        u1 = cs.MX.sym("u1")
-        u2 = cs.MX.sym("u2")
-        u3 = cs.MX.sym("u3")
-        u4 = cs.MX.sym("u4")
-        self.u = cs.vertcat(u1, u2, u3, u4)
+        self.f = cs.MX.sym("f")
+        self.r = cs.MX.sym("r", 3)  # angle rate
+
+        self.u = cs.vertcat(self.f, self.r)
 
         self.quad_xdot_nominal = self.quad_dynamics()
 
@@ -159,16 +158,16 @@ class Quad3DOptimizer:
 
         # Initial reference trajectory (will be overwritten)
         x_ref = np.zeros(nx)
-        ocp.cost.yref = np.concatenate((x_ref, np.array([0.0, 0.0, 0.0, 0.0])))
+        ocp.cost.yref = np.concatenate((x_ref, np.array([9.81, 0.0, 0.0, 0.0])))
         ocp.cost.yref_e = x_ref
 
         # Initial state (will be overwritten)
         ocp.constraints.x0 = x_ref
 
         # Set constraints
-        ocp.constraints.lbu = np.array([self.min_u] * 4)
-        ocp.constraints.ubu = np.array([self.max_u] * 4)
-        ocp.constraints.idxbu = np.array([0, 1, 2, 3])
+        ocp.constraints.lbu = np.r_[0.0, -8.0 * np.ones((3,))]
+        ocp.constraints.ubu = np.r_[80, 8.0 * np.ones((3,))]
+        ocp.constraints.idxbu = np.r_[0:4]
 
         # Solver options
         ocp.solver_options.qp_solver = "FULL_CONDENSING_HPIPM"
@@ -253,54 +252,28 @@ class Quad3DOptimizer:
             self.p_dynamics(),
             self.q_dynamics(),
             self.v_dynamics(),
-            self.w_dynamics(),
         )
         return cs.Function(
-            "x_dot", [self.x[:13], self.u], [x_dot], ["x", "u"], ["x_dot"]
+            "x_dot", [self.x[:10], self.u], [x_dot], ["x", "u"], ["x_dot"]
         )
 
     def p_dynamics(self):
-        return self.v
+        return quaternion_rotate_point(self.v, quaternion_inverse(self.q))
 
     def q_dynamics(self):
-        return 1 / 2 * cs.mtimes(skew_symmetric(self.r), self.q)
+        return 1 / 2 * quaternion_product(cs.vertcat(-self.r, 0), self.q)
 
     def v_dynamics(self):
 
-        f_thrust = self.u * self.quad.max_thrust
-        g = cs.vertcat(0.0, 0.0, 9.81)
-        a_thrust = (
-            cs.vertcat(0.0, 0.0, f_thrust[0] + f_thrust[1] + f_thrust[2] + f_thrust[3])
-            / self.quad.mass
-        )
+        # f_thrust = self.u * self.quad.max_thrust
+        g = cs.vertcat(0.0, 0.0, -9.81)
+        a_thrust = cs.vertcat(0.0, 0.0, self.f)
 
-        v_dynamics = v_dot_q(a_thrust, self.q) - g
+        v_dynamics = (
+            -cs.cross(self.r, self.v, 1) + quaternion_rotate_point(g, self.q) + a_thrust
+        )
 
         return v_dynamics
-
-    def w_dynamics(self):
-        f_thrust = self.u * self.quad.max_thrust
-
-        y_f = cs.MX(self.quad.y_f)
-        x_f = cs.MX(self.quad.x_f)
-        c_f = cs.MX(self.quad.z_l_tau)
-        return cs.vertcat(
-            (
-                cs.mtimes(f_thrust.T, y_f)
-                + (self.quad.J[1] - self.quad.J[2]) * self.r[1] * self.r[2]
-            )
-            / self.quad.J[0],
-            (
-                -cs.mtimes(f_thrust.T, x_f)
-                + (self.quad.J[2] - self.quad.J[0]) * self.r[2] * self.r[0]
-            )
-            / self.quad.J[1],
-            (
-                cs.mtimes(f_thrust.T, c_f)
-                + (self.quad.J[0] - self.quad.J[1]) * self.r[0] * self.r[1]
-            )
-            / self.quad.J[2],
-        )
 
     def linearized_quad_dynamics(self):
         """
@@ -318,10 +291,6 @@ class Quad3DOptimizer:
 
         # Angle derivatives
         jac[3:7, 3:7] = skew_symmetric(self.r) / 2
-        jac[3, 10:] = 1 / 2 * cs.horzcat(-self.q[1], -self.q[2], -self.q[3])
-        jac[4, 10:] = 1 / 2 * cs.horzcat(self.q[0], -self.q[3], self.q[2])
-        jac[5, 10:] = 1 / 2 * cs.horzcat(self.q[3], self.q[0], -self.q[1])
-        jac[6, 10:] = 1 / 2 * cs.horzcat(-self.q[2], self.q[1], self.q[0])
 
         # Velocity derivatives
         a_u = (
@@ -337,23 +306,6 @@ class Quad3DOptimizer:
         )
         jac[9, 3:7] = 2 * cs.horzcat(0, -2 * a_u * self.q[1], -2 * a_u * self.q[1], 0)
 
-        # Rate derivatives
-        jac[10, 10:] = (
-            (self.quad.J[1] - self.quad.J[2])
-            / self.quad.J[0]
-            * cs.horzcat(0, self.r[2], self.r[1])
-        )
-        jac[11, 10:] = (
-            (self.quad.J[2] - self.quad.J[0])
-            / self.quad.J[1]
-            * cs.horzcat(self.r[2], 0, self.r[0])
-        )
-        jac[12, 10:] = (
-            (self.quad.J[0] - self.quad.J[1])
-            / self.quad.J[2]
-            * cs.horzcat(self.r[1], self.r[0], 0)
-        )
-
         return cs.Function("J", [self.x, self.u], [jac])
 
     def set_reference_state(self, x_target=None, u_target=None):
@@ -364,16 +316,16 @@ class Quad3DOptimizer:
         """
 
         if x_target is None:
-            x_target = [[0, 0, 0], [1, 0, 0, 0], [0, 0, 0], [0, 0, 0]]
+            x_target = [[0, 0, 0], [1, 0, 0, 0], [0, 0, 0]]
         if u_target is None:
-            u_target = [0, 0, 0, 0]
+            u_target = [self.quad.mass * 9.81, 0, 0, 0]
 
         # Set new target state
         self.target = copy(x_target)
 
-        ref = np.concatenate([x_target[i] for i in range(4)])
+        ref = np.concatenate([x_target[i] for i in range(3)])
         #  Transform velocity to body frame
-        v_b = v_dot_q(ref[7:10], quaternion_inverse(ref[3:7]))
+        v_b = quaternion_rotate_point(ref[7:10], quaternion_inverse(ref[3:7]))
         ref = np.concatenate((ref[:7], v_b, ref[10:]))
 
         ref = np.concatenate((ref, u_target))

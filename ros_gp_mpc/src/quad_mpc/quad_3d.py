@@ -19,8 +19,10 @@ from src.utils.utils import (
     quaternion_inverse,
     quaternion_to_euler,
     skew_symmetric,
+    quaternion_product,
     unit_quat,
-    v_dot_q,
+    quaternion_rotate_point,
+    fast_cross,
 )
 
 
@@ -47,7 +49,7 @@ class Quadrotor3D:
         # System state space
         self.pos = np.zeros((3,))
         self.vel = np.zeros((3,))
-        self.angle = np.array([1.0, 0.0, 0.0, 0.0])  # Quaternion format: qw, qx, qy, qz
+        self.angle = np.array([0.0, 0.0, 0.0, 1.0])  # Quaternion format: qw, qx, qy, qz
         self.a_rate = np.zeros((3,))
 
         # System state space for GP evaluation.
@@ -104,7 +106,7 @@ class Quadrotor3D:
 
     def set_state(self, *args, **kwargs):
         if len(args) != 0:
-            assert len(args) == 1 and len(args[0]) == 13
+            assert len(args) == 1 and len(args[0]) == 10
             (
                 self.pos[0],
                 self.pos[1],
@@ -116,16 +118,12 @@ class Quadrotor3D:
                 self.vel[0],
                 self.vel[1],
                 self.vel[2],
-                self.a_rate[0],
-                self.a_rate[1],
-                self.a_rate[2],
             ) = args[0]
 
         else:
             self.pos = kwargs["pos"]
             self.angle = kwargs["angle"]
             self.vel = kwargs["vel"]
-            self.a_rate = kwargs["rate"]
 
     def set_gp_state(self, *args, **kwargs):
         if self.gp_pos is None:
@@ -164,7 +162,7 @@ class Quadrotor3D:
     def get_state(self, quaternion=False, stacked=False):
 
         if quaternion and not stacked:
-            return [self.pos, self.angle, self.vel, self.a_rate]
+            return [self.pos, self.angle, self.vel]
         if quaternion and stacked:
             return [
                 self.pos[0],
@@ -177,9 +175,6 @@ class Quadrotor3D:
                 self.vel[0],
                 self.vel[1],
                 self.vel[2],
-                self.a_rate[0],
-                self.a_rate[1],
-                self.a_rate[2],
             ]
 
         angle = quaternion_to_euler(self.angle)
@@ -194,11 +189,8 @@ class Quadrotor3D:
                 self.vel[0],
                 self.vel[1],
                 self.vel[2],
-                self.a_rate[0],
-                self.a_rate[1],
-                self.a_rate[2],
             ]
-        return [self.pos, angle, self.vel, self.a_rate]
+        return [self.pos, angle, self.vel]
 
     def get_gp_state(self, quaternion=False, stacked=False):
 
@@ -268,30 +260,26 @@ class Quadrotor3D:
 
         # RK4 integration
         k1, k2, k3, k4 = (
-            np.empty((13,)),
-            np.empty((13,)),
-            np.empty((13,)),
-            np.empty((13,)),
+            np.empty((10,)),
+            np.empty((10,)),
+            np.empty((10,)),
+            np.empty((10,)),
         )
         k1[0:3] = self.f_pos(x)
-        k1[3:7] = self.f_att(x)
+        k1[3:7] = self.f_att(x, self.u)
         k1[7:10] = self.f_vel(x, self.u, f_d)
-        k1[10:13] = self.f_rate(x, self.u, t_d)
         x_aux = x + dt / 2 * k1
         k2[0:3] = self.f_pos(x_aux)
-        k2[3:7] = self.f_att(x_aux)
+        k2[3:7] = self.f_att(x_aux, self.u)
         k2[7:10] = self.f_vel(x_aux, self.u, f_d)
-        k2[10:13] = self.f_rate(x_aux, self.u, t_d)
         x_aux = x + dt / 2 * k2
         k3[0:3] = self.f_pos(x_aux)
-        k3[3:7] = self.f_att(x_aux)
+        k3[3:7] = self.f_att(x_aux, self.u)
         k3[7:10] = self.f_vel(x_aux, self.u, f_d)
-        k3[10:13] = self.f_rate(x_aux, self.u, t_d)
         x_aux = x + dt * k3
         k4[0:3] = self.f_pos(x_aux)
-        k4[3:7] = self.f_att(x_aux)
+        k4[3:7] = self.f_att(x_aux, self.u)
         k4[7:10] = self.f_vel(x_aux, self.u, f_d)
-        k4[10:13] = self.f_rate(x_aux, self.u, t_d)
         x = x + dt * (1.0 / 6.0 * k1 + 2.0 / 6.0 * k2 + 2.0 / 6.0 * k3 + 1.0 / 6.0 * k4)
 
         # Ensure unit quaternion
@@ -300,7 +288,6 @@ class Quadrotor3D:
         self.pos = x[0:3]
         self.angle = x[3:7]
         self.vel = x[7:10]
-        self.a_rate = x[10:13]
 
     def f_pos(self, x):
         """
@@ -309,20 +296,21 @@ class Quadrotor3D:
         :return: position differential increment (vector): d[pos_x; pos_y]/dt
         """
 
-        vel = x[7:10]
+        vel = quaternion_rotate_point(x[7:10], quaternion_inverse(x[3:7]))
         return vel
 
-    def f_att(self, x):
+    def f_att(self, x, u):
         """
         Time-derivative of the attitude in quaternion form
         :param x: 4-length array of input state with components: 3D pos, quaternion angle, 3D vel, 3D rate
         :return: attitude differential increment (quaternion qw, qx, qy, qz): da/dt
         """
 
-        rate = x[10:13]
+        rate_q = np.zeros((4,))
+        rate_q[0:3] = -0.5 * u[1:4]
         angle_quaternion = x[3:7]
 
-        return 1 / 2 * skew_symmetric(rate).dot(angle_quaternion)
+        return quaternion_product(rate_q, angle_quaternion)
 
     def f_vel(self, x, u, f_d):
         """
@@ -333,17 +321,17 @@ class Quadrotor3D:
         :return: 3D velocity differential increment (vector): d[vel_x; vel_y; vel_z]/dt
         """
 
-        a_thrust = np.array([[0], [0], [np.sum(u)]]) / self.mass
+        a_thrust = np.array([[0], [0], [u[0]]])
 
         if self.drag:
             # Transform velocity to body frame
-            v_b = v_dot_q(x[7:10], quaternion_inverse(x[3:7]))[:, np.newaxis]
+            v_b = x[7:10]
             # Compute aerodynamic drag acceleration in world frame
             a_drag = -self.aero_drag * v_b**2 * np.sign(v_b) / self.mass
             # Add rotor drag
             a_drag -= self.rotor_drag * v_b / self.mass
             # Transform drag acceleration to world frame
-            a_drag = v_dot_q(a_drag, x[3:7])
+            a_drag = quaternion_rotate_point(a_drag, x[3:7])
         else:
             a_drag = np.zeros((3, 1))
 
@@ -352,10 +340,10 @@ class Quadrotor3D:
         a_payload = -self.payload_mass * self.g / self.mass
 
         return np.squeeze(
-            -self.g
-            + a_payload
-            + a_drag
-            + v_dot_q(a_thrust + f_d / self.mass, angle_quaternion)
+            -fast_cross(u[1:4], x[7:10])[..., None]
+            + a_thrust
+            + f_d / self.mass
+            + quaternion_rotate_point(-self.g, angle_quaternion)
         )
 
     def f_rate(self, x, u, t_d):

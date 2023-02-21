@@ -333,61 +333,67 @@ def unit_quat(q):
     return 1 / q_norm * q
 
 
-def v_dot_q(v, q):
-    rot_mat = q_to_rot_mat(q)
-    if isinstance(q, np.ndarray):
-        return rot_mat.dot(v)
+def fast_cross(a, b):
+    return np.array(
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    )
 
-    return cs.mtimes(rot_mat, v)
+
+def quaternion_rotate_point(v, q):
+    vec = q[0:3]
+    w = q[3]
+    if isinstance(q, np.ndarray):
+        uv = fast_cross(vec, v)
+        uv += uv
+        return v + w * uv + fast_cross(vec, uv)
+    if isinstance(q, cs.MX):
+        uv = cs.cross(vec, v, 1)
+        uv += uv
+        return v + w * uv + cs.cross(vec, uv, 1)
+    return NotImplementedError("This function only accepts ndarray or casadi MX types")
 
 
 def q_to_rot_mat(q):
-    qw, qx, qy, qz = q[0], q[1], q[2], q[3]
-
     if isinstance(q, np.ndarray):
-        rot_mat = np.array(
-            [
-                [
-                    1 - 2 * (qy ** 2 + qz ** 2),
-                    2 * (qx * qy - qw * qz),
-                    2 * (qx * qz + qw * qy),
-                ],
-                [
-                    2 * (qx * qy + qw * qz),
-                    1 - 2 * (qx ** 2 + qz ** 2),
-                    2 * (qy * qz - qw * qx),
-                ],
-                [
-                    2 * (qx * qz - qw * qy),
-                    2 * (qy * qz + qw * qx),
-                    1 - 2 * (qx ** 2 + qy ** 2),
-                ],
-            ]
-        )
-
+        res = np.empty((3, 3))
+    elif isinstance(q, cs.MX):
+        res = cs.MX(3, 3)
     else:
-        rot_mat = cs.vertcat(
-            cs.horzcat(
-                1 - 2 * (qy ** 2 + qz ** 2),
-                2 * (qx * qy - qw * qz),
-                2 * (qx * qz + qw * qy),
-            ),
-            cs.horzcat(
-                2 * (qx * qy + qw * qz),
-                1 - 2 * (qx ** 2 + qz ** 2),
-                2 * (qy * qz - qw * qx),
-            ),
-            cs.horzcat(
-                2 * (qx * qz - qw * qy),
-                2 * (qy * qz + qw * qx),
-                1 - 2 * (qx ** 2 + qy ** 2),
-            ),
+        raise NotImplementedError(
+            "This function only accepts ndarray or casadi MX types"
         )
 
-    return rot_mat
+    x, y, z, w = q[0], q[1], q[2], q[3]
+    tx = 2.0 * x
+    ty = 2.0 * y
+    tz = 2.0 * z
+    twx = tx * w
+    twy = ty * w
+    twz = tz * w
+    txx = tx * x
+    txy = ty * x
+    txz = tz * x
+    tyy = ty * y
+    tyz = tz * y
+    tzz = tz * z
+
+    res[0, 0] = 1.0 - (tyy + tzz)
+    res[0, 1] = txy - twz
+    res[0, 2] = txz + twy
+    res[1, 0] = txy + twz
+    res[1, 1] = 1.0 - (txx + tzz)
+    res[1, 2] = tyz - twx
+    res[2, 0] = txz - twy
+    res[2, 1] = tyz + twx
+    res[2, 2] = 1.0 - (txx + tyy)
+    return res
 
 
-def q_dot_q(q, r):
+def quaternion_product(q, r):
     """
     Applies the rotation of quaternion r to quaternion q. In order words, rotates quaternion q by r. Quaternion format:
     wxyz.
@@ -397,8 +403,8 @@ def q_dot_q(q, r):
     :return: The quaternion q rotated by r, with the same format as in the input.
     """
 
-    qw, qx, qy, qz = q[0], q[1], q[2], q[3]
-    rw, rx, ry, rz = r[0], r[1], r[2], r[3]
+    qw, qx, qy, qz = q[3], q[0], q[1], q[2]
+    rw, rx, ry, rz = r[3], r[0], r[1], r[2]
 
     t0 = rw * qw - rx * qx - ry * qy - rz * qz
     t1 = rw * qx + rx * qw - ry * qz + rz * qy
@@ -406,21 +412,45 @@ def q_dot_q(q, r):
     t3 = rw * qz - rx * qy + ry * qx + rz * qw
 
     if isinstance(q, np.ndarray):
-        return np.array([t0, t1, t2, t3])
+        return np.array([t1, t2, t3, t0])
     else:
-        return cs.vertcat(t0, t1, t2, t3)
+        return cs.vertcat(t1, t2, t3, t0)
 
 
-def rotation_matrix_to_quat(rot):
+def rotation_matrix_to_quat(mat):
     """
     Calculate a quaternion from a 3x3 rotation matrix.
 
     :param rot: 3x3 numpy array, representing a valid rotation matrix
     :return: a quaternion corresponding to the 3D rotation described by the input matrix. Quaternion format: wxyz
     """
+    t = mat.trace()
+    q = np.empty((4,))
+    if t > 0:
 
-    q = pyquaternion.Quaternion(matrix=rot)
-    return np.array([q.w, q.x, q.y, q.z])
+        t = np.sqrt(t + 1.0)
+        q[3] = 0.5 * t
+        t = 0.5 / t
+        q[0] = (mat[2, 1] - mat[1, 2]) * t
+        q[1] = (mat[0, 2] - mat[2, 0]) * t
+        q[2] = (mat[1, 0] - mat[0, 1]) * t
+
+    else:
+        i = 0
+        if mat[1, 1] > mat[0, 0]:
+            i = 1
+        if mat[2, 2] > mat[i, i]:
+            i = 2
+        j = (i + 1) % 3
+        k = (j + 1) % 3
+
+        t = np.sqrt(mat[i, i] - mat[j, j] - mat[k, k] + 1.0)
+        q[i] = 0.5 * t
+        t = 0.5 / t
+        q[0] = (mat[k, j] - mat[j, k]) * t
+        q[j] = (mat[j, i] + mat[i, j]) * t
+        q[k] = (mat[k, i] + mat[i, k]) * t
+    return q
 
 
 def undo_quaternion_flip(q_past, q_current):
@@ -474,24 +504,24 @@ def decompose_quaternion(q):
     the z rotation, in quaternion forms.
     """
 
-    w, x, y, z = q[0], q[1], q[2], q[3]
+    w, x, y, z = q[3], q[0], q[1], q[2]
 
     if isinstance(q, cs.MX):
-        qz = unit_quat(cs.vertcat(w, 0, 0, z))
+        qz = unit_quat(cs.vertcat(0, 0, z, w))
     else:
-        qz = unit_quat(np.array([w, 0, 0, z]))
-    qxy = q_dot_q(q, quaternion_inverse(qz))
+        qz = unit_quat(np.array([0, 0, z, w]))
+    qxy = quaternion_product(q, quaternion_inverse(qz))
 
     return qxy, qz
 
 
 def quaternion_inverse(q):
-    w, x, y, z = q[0], q[1], q[2], q[3]
+    w, x, y, z = q[3], q[0], q[1], q[2]
 
     if isinstance(q, np.ndarray):
-        return np.array([w, -x, -y, -z])
+        return np.array([-x, -y, -z, w])
     else:
-        return cs.vertcat(w, -x, -y, -z)
+        return cs.vertcat(-x, -y, -z, w)
 
 
 def rotation_matrix_to_euler(r_mat):
@@ -962,9 +992,9 @@ def quaternion_state_mse(x, x_ref, mask):
     :return: the mean squared error of both
     """
 
-    q_error = q_dot_q(x[3:7], quaternion_inverse(x_ref[3:7]))
+    q_error = quaternion_product(x[3:7], quaternion_inverse(x_ref[3:7]))
     e = np.concatenate(
-        (x[:3] - x_ref[:3], q_error[1:], x[7:10] - x_ref[7:10], x[10:] - x_ref[10:])
+        (x[:3] - x_ref[:3], q_error[:-1], x[7:10] - x_ref[7:10], x[10:] - x_ref[10:])
     )
 
     return np.sqrt((e * np.array(mask)).dot(e))

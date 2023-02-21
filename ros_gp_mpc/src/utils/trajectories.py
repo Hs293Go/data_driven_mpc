@@ -28,14 +28,15 @@ from src.utils.trajectory_generator import (
     get_full_traj,
 )
 from src.utils.utils import (
-    q_dot_q,
+    quaternion_product,
     quaternion_inverse,
     rotation_matrix_to_quat,
     undo_quaternion_flip,
+    quaternion_rotate_point,
 )
 
 
-def check_trajectory(trajectory, inputs, tvec, plot=False):
+def check_trajectory(trajectory, inputs, tvec, plot=False, frame="W2B"):
     """
 
     @param trajectory:
@@ -46,6 +47,14 @@ def check_trajectory(trajectory, inputs, tvec, plot=False):
     """
 
     print("Checking trajectory integrity...")
+
+    trajectory = np.array(trajectory)
+    if frame == "W2B":
+        for i in range(trajectory.shape[0]):
+            trajectory[i, 3:7] = quaternion_inverse(trajectory[i, 3:7])
+            trajectory[i, 7:10] = quaternion_rotate_point(
+                trajectory[i, 7:10], trajectory[i, 3:7]
+            )
 
     dt = np.expand_dims(np.gradient(tvec, axis=0), axis=1)
     numeric_derivative = np.gradient(trajectory, axis=0) / dt
@@ -79,13 +88,15 @@ def check_trajectory(trajectory, inputs, tvec, plot=False):
         e_z = np.array([0.0, 0.0, 1.0])
         q_w = 1.0 + np.dot(e_z, numeric_thrust)
         q_xyz = np.cross(e_z, numeric_thrust)
-        numeric_attitude = 0.5 * np.array([q_w] + q_xyz.tolist())
+        numeric_attitude = 0.5 * np.r_[q_xyz, q_w]
         numeric_attitude = numeric_attitude / np.linalg.norm(numeric_attitude)
         # the two attitudes can only differ in yaw --> check x,y component
-        q_diff = q_dot_q(quaternion_inverse(analytic_attitude), numeric_attitude)
-        errors[i, 1] = np.linalg.norm(q_diff[1:3])
+        q_diff = quaternion_product(
+            quaternion_inverse(analytic_attitude), numeric_attitude
+        )
+        errors[i, 1] = np.linalg.norm(q_diff[0:2])
         if not np.allclose(
-            q_diff[1:3],
+            q_diff[0:2],
             np.zeros(
                 2,
             ),
@@ -101,12 +112,12 @@ def check_trajectory(trajectory, inputs, tvec, plot=False):
         # 3) check if bodyrates agree with attitude difference
         numeric_bodyrates = (
             2.0
-            * q_dot_q(
+            * quaternion_product(
                 quaternion_inverse(trajectory[i, 3:7]), numeric_derivative[i, 3:7]
-            )[1:]
+            )[:3]
         )
         num_bodyrates.append(numeric_bodyrates)
-        analytic_bodyrates = trajectory[i, 10:13]
+        analytic_bodyrates = inputs[i, 1:4]
         errors[i, 2] = np.linalg.norm(numeric_bodyrates - analytic_bodyrates)
         if not np.allclose(numeric_bodyrates, analytic_bodyrates, atol=0.05, rtol=0.05):
             print("inconsistent angular velocity")
@@ -233,14 +244,16 @@ def minimum_snap_trajectory_generator(
         e_z = np.array([[0.0, 0.0, 1.0]])
         q_w = 1.0 + np.sum(e_z * z_b, axis=1)
         q_xyz = np.cross(e_z, z_b)
-        q = 0.5 * np.concatenate([np.expand_dims(q_w, axis=1), q_xyz], axis=1)
-        q = q / np.sqrt(np.sum(q ** 2, 1))[:, np.newaxis]
+        q = 0.5 * np.concatenate([q_xyz, np.expand_dims(q_w, axis=1)], axis=1)
+        q = q / np.sqrt(np.sum(q**2, 1))[:, np.newaxis]
 
         # Use numerical differentiation of quaternions
         q_dot = np.gradient(q, axis=0) / discretization_dt
         w_int = np.zeros((len_traj, 3))
         for i in range(len_traj):
-            w_int[i, :] = 2.0 * q_dot_q(quaternion_inverse(q[i, :]), q_dot[i])[1:]
+            w_int[i, :] = (
+                2.0 * quaternion_product(quaternion_inverse(q[i, :]), q_dot[i])[:3]
+            )
         rate[:, 0] = w_int[:, 0]
         rate[:, 1] = w_int[:, 1]
         rate[:, 2] = w_int[:, 2]
@@ -254,15 +267,20 @@ def minimum_snap_trajectory_generator(
                 yaw_corr = -rate[i, 2] * discretization_dt
                 yaw_corr_acc += yaw_corr
                 q_corr = np.array(
-                    [np.cos(yaw_corr_acc / 2.0), 0.0, 0.0, np.sin(yaw_corr_acc / 2.0)]
+                    [0.0, 0.0, np.sin(yaw_corr_acc / 2.0), np.cos(yaw_corr_acc / 2.0)]
                 )
-                q_new[i, :] = q_dot_q(q[i, :], q_corr)
-                w_int[i, :] = 2.0 * q_dot_q(quaternion_inverse(q[i, :]), q_dot[i])[1:]
+                q_new[i, :] = quaternion_product(q[i, :], q_corr)
+                w_int[i, :] = (
+                    2.0 * quaternion_product(quaternion_inverse(q[i, :]), q_dot[i])[:3]
+                )
 
             q_new_dot = np.gradient(q_new, axis=0) / discretization_dt
             for i in range(1, len_traj):
                 w_int[i, :] = (
-                    2.0 * q_dot_q(quaternion_inverse(q_new[i, :]), q_new_dot[i])[1:]
+                    2.0
+                    * quaternion_product(quaternion_inverse(q_new[i, :]), q_new_dot[i])[
+                        :3
+                    ]
                 )
 
             q = q_new
@@ -272,35 +290,15 @@ def minimum_snap_trajectory_generator(
             print("Maximum yawrate after adaption: %.3f" % np.max(np.abs(rate[:, 2])))
 
     # Compute inputs
-    rate_dot = np.gradient(rate, axis=0) / discretization_dt
-
-    rate_x_Jrate = np.array(
-        [
-            (quad.J[2] - quad.J[1]) * rate[:, 2] * rate[:, 1],
-            (quad.J[0] - quad.J[2]) * rate[:, 0] * rate[:, 2],
-            (quad.J[1] - quad.J[0]) * rate[:, 1] * rate[:, 0],
-        ]
-    ).T
-
-    tau = rate_dot * quad.J[np.newaxis, :] + rate_x_Jrate
-    b = np.concatenate((tau, f_t), axis=-1)
-    a_mat = np.concatenate(
-        (
-            quad.y_f[np.newaxis, :],
-            -quad.x_f[np.newaxis, :],
-            quad.z_l_tau[np.newaxis, :],
-            np.ones_like(quad.z_l_tau)[np.newaxis, :],
-        ),
-        0,
-    )
-
-    reference_u = np.zeros((len_traj, 4))
-    for i in range(len_traj):
-        reference_u[i, :] = np.linalg.solve(a_mat, b[i, :])
+    reference_u = np.column_stack((f_t, rate))
 
     full_pos = traj_derivatives[0, :, :].T
     full_vel = traj_derivatives[1, :, :].T
-    reference_traj = np.concatenate((full_pos, q, full_vel, rate), 1)
+    if frame == "W2B":
+        q[:, 0:3] = -q[:, 0:3]
+        for idx in range(len_traj):
+            full_vel[idx, :] = quaternion_rotate_point(full_vel[idx, :], q[idx, :])
+    reference_traj = np.concatenate((full_pos, q, full_vel), 1)
 
     if map_limits is None:
         # Locate starting point right at x=0 and y=0.
@@ -322,9 +320,6 @@ def minimum_snap_trajectory_generator(
 
     if plot:
         draw_poly(reference_traj, reference_u, t_ref)
-
-    # Change format of reference input to motor activation, in interval [0, 1]
-    reference_u = reference_u / quad.max_thrust
 
     return reference_traj, t_ref, reference_u
 

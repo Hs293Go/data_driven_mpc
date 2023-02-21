@@ -24,12 +24,12 @@ from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap
 from mpl_toolkits.mplot3d import Axes3D
 from src.utils.utils import (
-    q_dot_q,
+    quaternion_product,
     quaternion_inverse,
     quaternion_to_euler,
     safe_mkdir_recursive,
     safe_mknode_recursive,
-    v_dot_q,
+    quaternion_rotate_point,
 )
 
 
@@ -92,10 +92,10 @@ def draw_drone(pos, q_rot, x_f, y_f):
     x4 = np.array([x_f[3], y_f[3], 0])
 
     # Convert to world reference frame and add quadrotor center point:
-    x1 = v_dot_q(x1, q_rot) + pos
-    x2 = v_dot_q(x2, q_rot) + pos
-    x3 = v_dot_q(x3, q_rot) + pos
-    x4 = v_dot_q(x4, q_rot) + pos
+    x1 = quaternion_rotate_point(x1, q_rot) + pos
+    x2 = quaternion_rotate_point(x2, q_rot) + pos
+    x3 = quaternion_rotate_point(x3, q_rot) + pos
+    x4 = quaternion_rotate_point(x4, q_rot) + pos
 
     # Build set of coordinates for plotting
     return (
@@ -451,7 +451,11 @@ def trajectory_tracking_results(
         )
         q_err = []
         for i in range(t_ref.shape[0]):
-            q_err.append(q_dot_q(x_executed[i, 3:7], quaternion_inverse(x_ref[i, 3:7])))
+            q_err.append(
+                quaternion_product(
+                    x_executed[i, 3:7], quaternion_inverse(x_ref[i, 3:7])
+                )
+            )
         q_err = np.stack(q_err)
 
         for i in range(3):
@@ -471,15 +475,15 @@ def trajectory_tracking_results(
     ax[0, 2].set_title(r"$v\:[m/s]$")
     ax[2, 2].set_xlabel(r"$t [s]$")
 
-    for i in range(3):
-        ax[i, 3].plot(t_ref, x_executed[:, i + 10], label=legend_labels[1])
-        if with_ref:
-            ax[i, 3].plot(t_ref, x_ref[:, i + 10], label=legend_labels[0])
-        if w_control is not None:
-            ax[i, 3].plot(t_ref, w_control[:, i], label="control")
-        ax[i, 3].legend()
-    ax[0, 3].set_title(r"$\omega\:[rad/s]$")
-    ax[2, 3].set_xlabel(r"$t [s]$")
+    # for i in range(3):
+    #     ax[i, 3].plot(t_ref, u_executed[:, i + 10], label=legend_labels[1])
+    #     if with_ref:
+    #         ax[i, 3].plot(t_ref, x_ref[:, i + 10], label=legend_labels[0])
+    #     if w_control is not None:
+    #         ax[i, 3].plot(t_ref, w_control[:, i], label="control")
+    #     ax[i, 3].legend()
+    # ax[0, 3].set_title(r"$\omega\:[rad/s]$")
+    # ax[2, 3].set_xlabel(r"$t [s]$")
 
     plt.suptitle(title)
 
