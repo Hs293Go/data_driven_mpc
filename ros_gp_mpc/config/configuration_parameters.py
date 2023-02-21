@@ -47,7 +47,6 @@ class SimpleSimConfig:
         "noisy": True,  # Thrust and torque gaussian noises
         "drag": True,  # 2nd order polynomial aerodynamic drag effect
         "payload": False,  # Payload force in the Z axis
-        "motor_noise": True,  # Asymmetric voltage noise in the motors
     }
 
 

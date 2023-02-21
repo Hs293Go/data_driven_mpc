@@ -256,31 +256,13 @@ class Quadrotor3D:
         :param dt: time differential
         """
 
-        # Clip inputs
-        for i, u_i in enumerate(u):
-            self.u_noiseless[i] = max(
-                min(u_i, self.max_input_value), self.min_input_value
-            )
-
-        # Apply noise to inputs (uniformly distributed noise with standard deviation proportional to input magnitude)
-        if self.motor_noise:
-            for i, u_i in enumerate(self.u_noiseless):
-                std = 0.02 * sqrt(u_i)
-                noise_u = np.random.normal(loc=0.1 * (u_i / 1.3) ** 2, scale=std)
-                self.u[i] = (
-                    max(min(u_i - noise_u, self.max_input_value), self.min_input_value)
-                    * self.max_thrust
-                )
-        else:
-            self.u = self.u_noiseless * self.max_thrust
+        self.u[:] = u
 
         # Generate disturbance forces / torques
         if self.noisy:
             f_d = np.random.normal(size=(3, 1), scale=10 * dt)
-            t_d = np.random.normal(size=(3, 1), scale=10 * dt)
         else:
             f_d = np.zeros((3, 1))
-            t_d = np.zeros((3, 1))
 
         x = np.concatenate(self.get_state(quaternion=True, stacked=False))
 
