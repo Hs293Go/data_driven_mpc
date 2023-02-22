@@ -44,8 +44,8 @@ class SimpleSimConfig:
     # Choice of disturbances modeled in our Simplified Simulator. For more details about the parameters used refer to
     # the script: src/quad_mpc/quad_3d.py.
     simulation_disturbances = {
-        "noisy": True,  # Thrust and torque gaussian noises
-        "drag": True,  # 2nd order polynomial aerodynamic drag effect
+        "noisy": False,  # Thrust and torque gaussian noises
+        "drag": False,  # 2nd order polynomial aerodynamic drag effect
         "payload": False,  # Payload force in the Z axis
     }
 
