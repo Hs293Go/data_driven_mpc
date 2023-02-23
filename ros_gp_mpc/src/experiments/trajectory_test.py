@@ -18,7 +18,7 @@ import time
 
 import numpy as np
 from config.configuration_parameters import SimpleSimConfig
-from src.experiments.comparative_experiment import prepare_quadrotor_mpc
+from src.quad_mpc import Quadrotor3D, Quad3DMPC
 from src.utils.quad_3d_opt_utils import get_reference_chunk
 from src.utils.trajectories import (
     check_trajectory,
@@ -33,9 +33,6 @@ from tqdm import tqdm
 
 
 def main(args):
-    params = {
-        "quad_name": "my_quad",
-    }
 
     # Load the disturbances for the custom offline simulator.
     simulation_options = SimpleSimConfig.simulation_disturbances
@@ -43,13 +40,39 @@ def main(args):
     debug_plots = SimpleSimConfig.pre_run_debug_plots
     tracking_results_plot = SimpleSimConfig.result_plots
 
-    quad_mpc = prepare_quadrotor_mpc(simulation_options, **params)
+    q_diagonal = np.array([10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05])
+    r_diagonal = np.array([0.1, 0.1, 0.1, 0.1])
+    q_mask = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1]).T
+
+    t_horizon = 1.0
+    # Simulation integration step (the smaller the more "continuous"-like simulation.
+    simulation_dt = 5e-4
+
+    # Number of MPC optimization nodes
+    n_mpc_nodes = 10
+
+    # Calculate time between two MPC optimization nodes [s]
+    node_dt = t_horizon / n_mpc_nodes
+
+    # Quadrotor simulator
+    my_quad = Quadrotor3D(**simulation_options)
+
+    quad_name = "my_quad_0"
+
+    # Initialize quad MPC
+    quad_mpc = Quad3DMPC(
+        my_quad,
+        t_horizon=t_horizon,
+        optimization_dt=node_dt,
+        simulation_dt=simulation_dt,
+        q_cost=q_diagonal,
+        r_cost=r_diagonal,
+        n_nodes=n_mpc_nodes,
+        model_name=quad_name,
+        q_mask=q_mask,
+    )
 
     # Recover some necessary variables from the MPC object
-    my_quad = quad_mpc.quad
-    n_mpc_nodes = quad_mpc.n_nodes
-    t_horizon = quad_mpc.t_horizon
-    simulation_dt = quad_mpc.simulation_dt
     reference_over_sampling = 5
     control_period = t_horizon / (n_mpc_nodes * reference_over_sampling)
 
