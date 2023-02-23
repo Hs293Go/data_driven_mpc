@@ -1,11 +1,16 @@
 import casadi as cs
 import numpy as np
+from numpy.typing import ArrayLike
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 from src.utils.utils import (
     quaternion_inverse,
     quaternion_product,
     quaternion_rotate_point,
 )
+
+
+class AcadosWrapperException(Exception):
+    pass
 
 
 def make_acados_optimizer(
@@ -69,10 +74,10 @@ def make_acados_optimizer(
 
     # Add one more weight to the rotation (use quaternion norm weighting in acados)
     q_diagonal = np.concatenate(
-        (q_cost[:3], np.mean(q_cost[3:6])[np.newaxis], q_cost[3:])
+        (q_cost[:6], np.mean(q_cost[6:9])[np.newaxis], q_cost[6:])
     )
     if q_mask is not None:
-        q_mask = np.concatenate((q_mask[:3], np.zeros(1), q_mask[3:]))
+        q_mask = np.concatenate((q_mask[:6], np.zeros(1), q_mask[6:]))
         q_diagonal *= q_mask
 
     nx = acados_model.x.size()[0]
@@ -136,41 +141,62 @@ def make_acados_optimizer(
     return solver, acados_data
 
 
-def set_reference_trajectory(acados_ocp_solver, N, x_reference, u_reference):
-    if u_reference is not None:
-        if not (
-            x_reference[0].shape[0] == (u_reference.shape[0] + 1)
-            or x_reference[0].shape[0] == u_reference.shape[0]
-        ):
-            return False
+def set_reference_trajectory(
+    acados_ocp_solver: AcadosOcpSolver,
+    N: int,
+    x_reference: ArrayLike,
+    u_reference: ArrayLike,
+) -> None:
+    """Sets a target trajectory for the Optimal Control Problem solver
+
+    Parameters
+    ----------
+    acados_ocp_solver : AcadosOcpSolver
+        An instance of the Acados Optimal Control Problem Solver
+    N : int
+        Number of shooting nodes
+    x_reference : ArrayLike
+        The state reference, stacked row-wise for each shooting node. If there are fewer
+        states than shooting nodes, i.e. x_reference has fewer rows than N + 1, then it
+        will be padded by the last state
+    u_reference : ArrayLike
+        The input reference, stacked row-wise for each shooting node. The number of
+        inputs must match the number of states or one less than the number of reference
+        states
+
+    Raises
+    ------
+    AcadosException
+        When the number of input references does not match the number of state references
+    """
+
+    x_reference = np.asarray(x_reference)
+    u_reference = np.asarray(u_reference)
+    n_x_samples, nx = x_reference.shape
+    n_u_samples, nu = u_reference.shape
+    if n_x_samples not in (n_u_samples + 1, n_u_samples):
+        raise AcadosWrapperException(
+            f"Number of state ({n_x_samples}) and input ({n_u_samples}) references do not match"
+        )
 
     # If not enough states in target sequence, append last state until required length is met
-    while x_reference[0].shape[0] < N + 1:
-        x_reference = [
-            np.concatenate((x, np.expand_dims(x[-1, :], 0)), 0) for x in x_reference
-        ]
-        if u_reference is not None:
-            u_reference = np.concatenate(
-                (u_reference, np.expand_dims(u_reference[-1, :], 0)), 0
-            )
-
-    stacked_x_reference = np.concatenate([x for x in x_reference], 1)
+    if n_x_samples < N + 1:
+        x_reference_data, x_reference = x_reference.copy(), np.empty((N + 1, nx))
+        u_reference_data, u_reference = u_reference.copy(), np.empty((N, nu))
+        x_reference[:n_x_samples, :] = x_reference_data
+        u_reference[:n_u_samples, :] = u_reference_data
+        x_reference[n_x_samples:, :] = x_reference_data[-1, :]
+        u_reference[n_u_samples:, :] = u_reference_data[-1, :]
 
     for j in range(N):
-        ref = stacked_x_reference[j, :]
-        ref = np.concatenate((ref, u_reference[j, :]))
+        ref = np.concatenate((x_reference[j, :], u_reference[j, :]))
         acados_ocp_solver.set(j, "yref", ref)
     # the last MPC node has only a state reference but no input reference
-    acados_ocp_solver.set(N, "yref", stacked_x_reference[N, :])
-
-    return True
+    acados_ocp_solver.set(N, "yref", x_reference[N, :])
 
 
 def set_reference_state(acados_ocp_solver, N, x_reference, u_reference):
-    ref = np.concatenate([x_reference[i] for i in range(3)])
-    #  Transform velocity to body frame
-
-    ref = np.concatenate((ref, u_reference))
+    ref = np.concatenate((np.asarray(x_reference), np.asarray(u_reference)))
 
     for j in range(N):
         acados_ocp_solver.set(j, "yref", ref)
@@ -181,8 +207,7 @@ def set_reference_state(acados_ocp_solver, N, x_reference, u_reference):
 
 def optimize(acados_ocp_solver, N, quad_current_state):
     # Set initial state. Add gp state if needed
-    x_init = quad_current_state
-    x_init = np.stack(x_init)
+    x_init = np.asarray(quad_current_state)
 
     # Set initial condition, equality constraint
     acados_ocp_solver.set(0, "lbx", x_init)

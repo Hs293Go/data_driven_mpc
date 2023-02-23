@@ -18,18 +18,18 @@ import time
 
 import numpy as np
 from config.configuration_parameters import SimpleSimConfig
-from src.quad_mpc import Quadrotor3D, Quad3DMPC
+from src.quad_mpc import Quadrotor3D
 from src.utils.quad_3d_opt_utils import get_reference_chunk
 from src.utils.trajectories import (
     check_trajectory,
     lemniscate_trajectory,
     loop_trajectory,
 )
-from src.utils.utils import separate_variables
 from src.utils.visualization import (
     trajectory_tracking_results,
 )
 from tqdm import tqdm
+from src.quad_mpc import wrapper
 
 
 def main(args):
@@ -60,11 +60,8 @@ def main(args):
     quad_name = "my_quad_0"
 
     # Initialize quad MPC
-    quad_mpc = Quad3DMPC(
-        my_quad,
+    quad_mpc, opt_data = wrapper.make_acados_optimizer(
         t_horizon=t_horizon,
-        optimization_dt=node_dt,
-        simulation_dt=simulation_dt,
         q_cost=q_diagonal,
         r_cost=r_diagonal,
         n_nodes=n_mpc_nodes,
@@ -151,16 +148,21 @@ def main(args):
         )
 
         # Set the reference for the OCP
-        if not quad_mpc.set_reference(
-            x_reference=separate_variables(ref_traj_chunk), u_reference=ref_u_chunk
-        ):
-            raise RuntimeError(
-                f"Failed to set reference on trajectory index {current_idx}"
+        try:
+            wrapper.set_reference_trajectory(
+                quad_mpc,
+                n_mpc_nodes,
+                x_reference=ref_traj_chunk,
+                u_reference=ref_u_chunk,
             )
+        except wrapper.AcadosWrapperException as exc:
+            raise wrapper.AcadosWrapperException(
+                f"Failed to set reference on trajectory index {current_idx}"
+            ) from exc
 
         # Optimize control input to reach pre-set target
         t_opt_init = time.time()
-        w_opt, x_pred = quad_mpc.optimize(return_x=True)
+        w_opt, _ = wrapper.optimize(quad_mpc, n_mpc_nodes, quad_current_state)
         mean_opt_time += time.time() - t_opt_init
 
         # Select first input (one for each motor) - MPC applies only first optimized input to the plant
@@ -173,7 +175,7 @@ def main(args):
         while simulation_time < control_period:
             simulation_time += simulation_dt
             total_sim_time += simulation_dt
-            quad_mpc.simulate(ref_u)
+            my_quad.update(ref_u, simulation_dt)
 
     u_optimized_seq[current_idx, :] = np.reshape(ref_u, (1, -1))
 
