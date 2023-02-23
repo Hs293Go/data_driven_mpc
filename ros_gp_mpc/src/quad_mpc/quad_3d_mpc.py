@@ -13,8 +13,14 @@ this program. If not, see <http://www.gnu.org/licenses/>.
 
 
 import numpy as np
-from src.quad_mpc.quad_3d_optimizer import Quad3DOptimizer
 from src.utils.quad_3d_opt_utils import simulate_plant, uncertainty_forward_propagation
+
+from .utils import (
+    make_acados_optimizer,
+    optimize,
+    set_reference_state,
+    set_reference_trajectory,
+)
 
 
 class Quad3DMPC:
@@ -55,23 +61,18 @@ class Quad3DMPC:
         # motor commands from last step
         self.motor_u = np.array([0.0, 0.0, 0.0, 0.0])
 
-        self.n_nodes = n_nodes
-        self.t_horizon = t_horizon
-
         # For MPC optimization use
-        self.quad_opt = Quad3DOptimizer(
-            my_quad,
-            t_horizon=t_horizon,
-            n_nodes=n_nodes,
-            q_cost=q_cost,
-            r_cost=r_cost,
-            model_name=model_name,
-            q_mask=q_mask,
-            solver_options=solver_options,
+        self.acados_ocp_solver, ocp_data = make_acados_optimizer(
+            t_horizon,
+            n_nodes,
+            q_cost,
+            r_cost,
+            q_mask,
+            model_name,
+            solver_options,
         )
-
-    def clear(self):
-        self.quad_opt.clear_acados_model()
+        self.t_horizon = ocp_data["T"]
+        self.n_nodes = ocp_data["N"]
 
     def get_state(self):
         """
@@ -93,10 +94,20 @@ class Quad3DMPC:
 
         if isinstance(x_reference[0], list):
             # Target state is just a point
-            return self.quad_opt.set_reference_state(x_reference, u_reference)
+            return set_reference_state(
+                self.acados_ocp_solver,
+                self.n_nodes,
+                x_reference,
+                u_reference,
+            )
         else:
             # Target state is a sequence
-            return self.quad_opt.set_reference_trajectory(x_reference, u_reference)
+            return set_reference_trajectory(
+                self.acados_ocp_solver,
+                self.n_nodes,
+                x_reference,
+                u_reference,
+            )
 
     def optimize(self, return_x=False):
         """
@@ -111,11 +122,7 @@ class Quad3DMPC:
         quad_current_state = self.quad.get_state(quaternion=True, stacked=True)
 
         # Remove rate state for simplified model NLP
-        out_out = self.quad_opt.run_optimization(
-            quad_current_state,
-            return_x=return_x,
-        )
-        return out_out
+        return optimize(self.acados_ocp_solver, self.n_nodes, quad_current_state)
 
     def simulate(self, ref_u):
         """
