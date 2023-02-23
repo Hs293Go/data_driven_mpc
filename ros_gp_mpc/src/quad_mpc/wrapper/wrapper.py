@@ -1,5 +1,6 @@
 import casadi as cs
 import numpy as np
+from typing import Dict, Union, Any
 from numpy.typing import ArrayLike
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 from src.utils.utils import (
@@ -8,33 +9,24 @@ from src.utils.utils import (
     quaternion_rotate_point,
 )
 
+DEFAULT_Q_COST = np.array(
+    [10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05], dtype=np.double
+)
+
+DEFAULT_R_COST = np.array([0.1, 0.1, 0.1, 0.1], dtype=np.double)
+
+DEFAULT_STATE = np.array(
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=np.double
+)
+
+DEFAULT_INPUT = np.array([9.81, 0.0, 0.0, 0.0], dtype=np.double)
+
 
 class AcadosWrapperException(Exception):
     pass
 
 
-def make_acados_optimizer(
-    t_horizon,
-    n_nodes,
-    q_cost,
-    r_cost,
-    q_mask,
-    model_name,
-    solver_options=None,
-    solver_kw=None,
-):
-    # Weighted squared error loss function q = (p_xyz, a_xyz, v_xyz, r_xyz), r = (u1, u2, u3, u4)
-    if q_cost is None:
-        q_cost = np.array(
-            [10, 10, 10, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
-        )
-    if r_cost is None:
-        r_cost = np.array([0.1, 0.1, 0.1, 0.1])
-
-    acados_data = {
-        "T": t_horizon,
-        "N": n_nodes,
-    }
+def make_quadrotor_model(model_name: str):
     # Declare model variables
     p = cs.MX.sym("p", 3)  # position
     q = cs.MX.sym("a", 4)  # angle quaternion (wxyz)
@@ -71,15 +63,30 @@ def make_acados_optimizer(
     acados_model.u = u
     acados_model.p = []
     acados_model.name = model_name
+    return acados_model
+
+
+def make_acados_optimizer(
+    t_horizon,
+    n_nodes,
+    q_cost=DEFAULT_Q_COST,
+    r_cost=DEFAULT_R_COST,
+    q_mask=None,
+    model_name="my_quad",
+    solver_options: Union[None, Dict[str, str]] = None,
+    solver_kw: Union[Any, None] = None,
+):
+    q_cost = np.asarray(q_cost)
+    r_cost = np.asarray(r_cost)
+    # Weighted squared error loss function q = (p_xyz, a_xyz, v_xyz, r_xyz), r = (u1, u2, u3, u4)
 
     # Add one more weight to the rotation (use quaternion norm weighting in acados)
-    q_diagonal = np.concatenate(
-        (q_cost[:6], np.mean(q_cost[6:9])[np.newaxis], q_cost[6:])
-    )
+    q_cost = np.concatenate((q_cost[:3], np.mean(q_cost[3:6])[np.newaxis], q_cost[3:]))
     if q_mask is not None:
-        q_mask = np.concatenate((q_mask[:6], np.zeros(1), q_mask[6:]))
-        q_diagonal *= q_mask
+        q_mask = np.concatenate((q_mask[:3], [0], q_mask[3:]))
+        q_cost *= q_mask
 
+    acados_model = make_quadrotor_model(model_name)
     nx = acados_model.x.size()[0]
     nu = acados_model.u.size()[0]
     ny = nx + nu
@@ -98,8 +105,8 @@ def make_acados_optimizer(
     ocp.cost.cost_type = "LINEAR_LS"
     ocp.cost.cost_type_e = "LINEAR_LS"
 
-    ocp.cost.W = np.diag(np.concatenate((q_diagonal, r_cost)))
-    ocp.cost.W_e = np.diag(q_diagonal)
+    ocp.cost.W = np.diag(np.concatenate((q_cost, r_cost)))
+    ocp.cost.W_e = np.diag(q_cost)
     terminal_cost = (
         0 if solver_options is None or not solver_options["terminal_cost"] else 1
     )
@@ -113,12 +120,11 @@ def make_acados_optimizer(
     ocp.cost.Vx_e = np.eye(nx)
 
     # Initial reference trajectory (will be overwritten)
-    x_ref = np.zeros(nx)
-    ocp.cost.yref = np.concatenate((x_ref, np.array([9.81, 0.0, 0.0, 0.0])))
-    ocp.cost.yref_e = x_ref
+    ocp.cost.yref = np.concatenate((DEFAULT_STATE, DEFAULT_INPUT))
+    ocp.cost.yref_e = DEFAULT_STATE
 
     # Initial state (will be overwritten)
-    ocp.constraints.x0 = x_ref
+    ocp.constraints.x0 = DEFAULT_STATE
 
     # Set constraints
     ocp.constraints.lbu = np.r_[0.0, -8.0 * np.ones((3,))]
@@ -126,19 +132,13 @@ def make_acados_optimizer(
     ocp.constraints.idxbu = np.r_[0:4]
 
     # Solver options
-    ocp.solver_options.qp_solver = "FULL_CONDENSING_HPIPM"
-    ocp.solver_options.hessian_approx = "GAUSS_NEWTON"
-    ocp.solver_options.integrator_type = "ERK"
-    ocp.solver_options.print_level = 0
-    ocp.solver_options.nlp_solver_type = (
-        "SQP_RTI" if solver_options is None else solver_options["solver_type"]
-    )
+    if solver_options is not None:
+        for k, v in solver_options:
+            ocp.solver_options.set(k, v)
     if solver_kw is not None:
-        solver = AcadosOcpSolver(ocp, **solver_kw)
-    else:
-        solver = AcadosOcpSolver(ocp)
+        return AcadosOcpSolver(ocp, **solver_kw)
 
-    return solver, acados_data
+    return AcadosOcpSolver(ocp)
 
 
 def set_reference_trajectory(
