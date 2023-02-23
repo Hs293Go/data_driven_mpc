@@ -98,11 +98,9 @@ class Quadrotor3D:
     def vel(self, val):
         self._state[7:10] = np.asarray(val)
 
-    def get_control(self, noisy=False):
-        if not noisy:
-            return self.u_noiseless
-        else:
-            return self.u
+    @property
+    def control(self):
+        return self.u
 
     def update(self, u, dt):
         """

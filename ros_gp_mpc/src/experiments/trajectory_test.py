@@ -118,7 +118,7 @@ def main(args):
 
     # Set quad initial state equal to the initial reference trajectory state
     quad_current_state = reference_traj[0, :].tolist()
-    my_quad.set_state(quad_current_state)
+    my_quad.state = quad_current_state
 
     ref_u = reference_u[0, :]
     quad_trajectory = np.zeros((len(reference_timestamps), len(quad_current_state)))
@@ -136,7 +136,7 @@ def main(args):
     print("\nRunning simulation...")
     for current_idx in tqdm(range(reference_traj.shape[0])):
 
-        quad_current_state = my_quad.get_state(quaternion=True, stacked=True)
+        quad_current_state = my_quad.state
 
         quad_trajectory[current_idx, :] = np.expand_dims(quad_current_state, axis=0)
 
@@ -177,7 +177,7 @@ def main(args):
 
     u_optimized_seq[current_idx, :] = np.reshape(ref_u, (1, -1))
 
-    quad_current_state = my_quad.get_state(quaternion=True, stacked=True)
+    quad_current_state = my_quad.state
     quad_trajectory[-1, :] = np.expand_dims(quad_current_state, axis=0)
     u_optimized_seq[-1, :] = np.reshape(ref_u, (1, -1))
 
