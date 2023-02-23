@@ -56,7 +56,7 @@ class Quadrotor3D:
         self.rotor_drag_z = 0.0  # No rotor drag in the z dimension
         self.rotor_drag = np.array(
             [self.rotor_drag_xy, self.rotor_drag_xy, self.rotor_drag_z]
-        )[:, np.newaxis]
+        )
         self.aero_drag = 0.08
 
         self.drag = drag
