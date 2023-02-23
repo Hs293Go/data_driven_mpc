@@ -74,14 +74,14 @@ class Quad3DMPC:
         self.t_horizon = ocp_data["T"]
         self.n_nodes = ocp_data["N"]
 
-    def get_state(self):
+    @property
+    def state(self):
         """
         Returns the state of the drone, with the angle described as a wxyz quaternion
         :return: 13x1 array with the drone state: [p_xyz, a_wxyz, v_xyz, r_xyz]
         """
 
-        x = np.expand_dims(self.quad.get_state(quaternion=True, stacked=True), 1)
-        return x
+        return self.quad.state
 
     def set_reference(self, x_reference, u_reference=None):
         """
@@ -119,7 +119,7 @@ class Quad3DMPC:
         state prediction.
         """
 
-        quad_current_state = self.quad.get_state(quaternion=True, stacked=True)
+        quad_current_state = self.quad.state
 
         # Remove rate state for simplified model NLP
         return optimize(self.acados_ocp_solver, self.n_nodes, quad_current_state)

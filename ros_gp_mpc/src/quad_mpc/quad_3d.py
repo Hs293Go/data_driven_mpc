@@ -47,6 +47,7 @@ class Quadrotor3D:
         self.max_thrust = 20
 
         # System state space
+        self._state = np.empty((10,))
         self.pos = np.zeros((3,))
         self.vel = np.zeros((3,))
         self.angle = np.array([0.0, 0.0, 0.0, 1.0])  # Quaternion format: qw, qx, qy, qz
@@ -104,135 +105,37 @@ class Quadrotor3D:
         self.payload_mass = 0.3  # kg
         self.payload_mass = self.payload_mass * payload
 
-    def set_state(self, *args, **kwargs):
-        if len(args) != 0:
-            assert len(args) == 1 and len(args[0]) == 10
-            (
-                self.pos[0],
-                self.pos[1],
-                self.pos[2],
-                self.angle[0],
-                self.angle[1],
-                self.angle[2],
-                self.angle[3],
-                self.vel[0],
-                self.vel[1],
-                self.vel[2],
-            ) = args[0]
+    @property
+    def state(self):
+        return self._state
 
-        else:
-            self.pos = kwargs["pos"]
-            self.angle = kwargs["angle"]
-            self.vel = kwargs["vel"]
+    @state.setter
+    def state(self, val):
+        self._state[:] = np.asarray(val)
 
-    def set_gp_state(self, *args, **kwargs):
-        if self.gp_pos is None:
-            # Instantiate these variables for the first time
-            self.gp_pos = np.zeros((3,))
-            self.gp_vel = np.zeros((3,))
-            self.gp_angle = np.array(
-                [1.0, 0.0, 0.0, 0.0]
-            )  # Quaternion format: qw, qx, qy, qz
-            self.gp_a_rate = np.zeros((3,))
+    @property
+    def pos(self):
+        return self._state[0:3]
 
-        if len(args) != 0:
-            assert len(args) == 1 and len(args[0]) == 13
-            (
-                self.gp_pos[0],
-                self.gp_pos[1],
-                self.gp_pos[2],
-                self.gp_angle[0],
-                self.gp_angle[1],
-                self.gp_angle[2],
-                self.gp_angle[3],
-                self.gp_vel[0],
-                self.gp_vel[1],
-                self.gp_vel[2],
-                self.gp_a_rate[0],
-                self.gp_a_rate[1],
-                self.gp_a_rate[2],
-            ) = args[0]
+    @pos.setter
+    def pos(self, val):
+        self._state[0:3] = np.asarray(val)
 
-        else:
-            self.gp_pos = kwargs["pos"]
-            self.gp_angle = kwargs["angle"]
-            self.gp_vel = kwargs["vel"]
-            self.gp_a_rate = kwargs["rate"]
+    @property
+    def angle(self):
+        return self._state[3:7]
 
-    def get_state(self, quaternion=False, stacked=False):
+    @angle.setter
+    def angle(self, val):
+        self._state[3:7] = np.asarray(val)
 
-        if quaternion and not stacked:
-            return [self.pos, self.angle, self.vel]
-        if quaternion and stacked:
-            return [
-                self.pos[0],
-                self.pos[1],
-                self.pos[2],
-                self.angle[0],
-                self.angle[1],
-                self.angle[2],
-                self.angle[3],
-                self.vel[0],
-                self.vel[1],
-                self.vel[2],
-            ]
+    @property
+    def vel(self):
+        return self._state[7:10]
 
-        angle = quaternion_to_euler(self.angle)
-        if not quaternion and stacked:
-            return [
-                self.pos[0],
-                self.pos[1],
-                self.pos[2],
-                angle[0],
-                angle[1],
-                angle[2],
-                self.vel[0],
-                self.vel[1],
-                self.vel[2],
-            ]
-        return [self.pos, angle, self.vel]
-
-    def get_gp_state(self, quaternion=False, stacked=False):
-
-        if self.gp_pos is None:
-            return None
-
-        if quaternion and not stacked:
-            return [self.gp_pos, self.gp_angle, self.gp_vel, self.gp_a_rate]
-        if quaternion and stacked:
-            return [
-                self.gp_pos[0],
-                self.gp_pos[1],
-                self.gp_pos[2],
-                self.gp_angle[0],
-                self.gp_angle[1],
-                self.gp_angle[2],
-                self.gp_angle[3],
-                self.gp_vel[0],
-                self.gp_vel[1],
-                self.gp_vel[2],
-                self.gp_a_rate[0],
-                self.gp_a_rate[1],
-                self.gp_a_rate[2],
-            ]
-
-        gp_angle = quaternion_to_euler(self.gp_angle)
-        if not quaternion and stacked:
-            return [
-                self.gp_pos[0],
-                self.gp_pos[1],
-                self.gp_pos[2],
-                gp_angle[0],
-                gp_angle[1],
-                gp_angle[2],
-                self.gp_vel[0],
-                self.gp_vel[1],
-                self.gp_vel[2],
-                self.gp_a_rate[0],
-                self.gp_a_rate[1],
-                self.gp_a_rate[2],
-            ]
-        return [self.gp_pos, gp_angle, self.gp_vel, self.gp_a_rate]
+    @vel.setter
+    def vel(self, val):
+        self._state[7:10] = np.asarray(val)
 
     def get_control(self, noisy=False):
         if not noisy:
@@ -256,7 +159,7 @@ class Quadrotor3D:
         else:
             f_d = np.zeros((3, 1))
 
-        x = np.concatenate(self.get_state(quaternion=True, stacked=False))
+        x = self.state
 
         # RK4 integration
         k1, k2, k3, k4 = (
