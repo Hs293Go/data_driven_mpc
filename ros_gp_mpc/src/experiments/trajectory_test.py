@@ -166,8 +166,8 @@ def main(args):
         mean_opt_time += time.time() - t_opt_init
 
         # Select first input (one for each motor) - MPC applies only first optimized input to the plant
-        ref_u = np.squeeze(np.array(w_opt[:4]))
-        u_optimized_seq[current_idx, :] = np.reshape(ref_u, (1, -1))
+        ref_u = w_opt[0, :]
+        u_optimized_seq[current_idx, :] = ref_u
 
         simulation_time = 0.0
 

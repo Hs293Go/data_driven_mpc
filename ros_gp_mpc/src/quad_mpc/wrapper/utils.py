@@ -224,5 +224,4 @@ def optimize(acados_ocp_solver, N, quad_current_state):
         w_opt_acados[i, :] = acados_ocp_solver.get(i, "u")
         x_opt_acados[i + 1, :] = acados_ocp_solver.get(i + 1, "x")
 
-    w_opt_acados = np.reshape(w_opt_acados, (-1))
-    return (w_opt_acados, x_opt_acados)
+    return w_opt_acados, x_opt_acados
